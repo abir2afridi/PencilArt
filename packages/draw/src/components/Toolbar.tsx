@@ -12,6 +12,7 @@ import {
   UndoIcon,
 } from "./icons";
 import { HexField, pickFromScreen, supportsEyeDropper } from "./HexField";
+import { Spectrum } from "./Spectrum";
 import { ToolIcon } from "./ToolIcon";
 import { ToolMenu } from "./ToolMenu";
 import { useTooltips, type TooltipOptions } from "./Tooltip";
@@ -414,9 +415,12 @@ export function Toolbar({
                       }
                       style={{ background: c }}
                       onClick={() => {
-                        onChange({ color: c });
-                        // Reaching for a colour means you want to draw with it.
+                        // Reaching for a colour means you want to draw with it,
+                        // so the pen is chosen first: `onChange` looks at the
+                        // active tool, and while the eraser is in hand a colour
+                        // pick would be dropped before the switch ever ran.
                         if (isEraser) onSelect("pen");
+                        onChange({ color: c });
                       }}
                       aria-label={c}
                       title={c}
@@ -476,16 +480,23 @@ export function Toolbar({
                   style={{ background: tool.color }}
                   aria-hidden
                 />
-                {/* Not on a rail. Six characters and a field to hold them needs
-                  more width than 66px has, and every way of cramming it in
-                  looked cramped. The eyedropper covers picking an exact colour;
-                  typing one is a job for the wide bar. */}
+                {/* The field and strip are the picker; the eyedropper covers
+                    sampling, and the hex field is for typing an exact code. */}
+                {!vertical && (
+                  <Spectrum
+                    color={tool.color}
+                    onChange={(color) => {
+                      if (isEraser) onSelect("pen");
+                      onChange({ color });
+                    }}
+                  />
+                )}
                 {!vertical && (
                   <HexField
                     value={tool.color}
                     onChange={(color) => {
-                      onChange({ color });
                       if (isEraser) onSelect("pen");
+                      onChange({ color });
                     }}
                   />
                 )}
@@ -498,8 +509,8 @@ export function Toolbar({
                     onClick={async () => {
                       const picked = await pickFromScreen();
                       if (!picked) return;
-                      onChange({ color: picked });
                       if (isEraser) onSelect("pen");
+                      onChange({ color: picked });
                     }}
                   >
                     <DropperIcon />

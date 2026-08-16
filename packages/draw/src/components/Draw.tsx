@@ -270,7 +270,12 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
       inkMode === "shared"
         ? ink
         : (inks[id] ??
-          (inkMode === "auto" ? PEN_BY_ID[id].defaultColor : undefined) ??
+          // A pen with a colour of its own opens in it, but only until a
+          // colour is actually chosen — after that, a pick of red followed
+          // by the highlighter laying down yellow reads as a broken picker.
+          (inkMode === "auto" && !chosen.current
+            ? PEN_BY_ID[id].defaultColor
+            : undefined) ??
           ink),
     [inks, ink, inkMode],
   );
@@ -300,13 +305,15 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
       setTool((t) => {
         if (p.color && t.active !== "eraser") {
           chosen.current = true;
-          // A pen that came with a colour of its own keeps its own; recolouring
-          // a highlighter shouldn't reach across and recolour the pencil. Every
-          // other pen writes to the shared ink, so choosing a colour once still
-          // applies to all of them.
+          // A pen that came with a colour of its own keeps its own until the
+          // first choice is made; once one is, every pen follows it. Every
+          // other pen writes to the shared ink, so choosing a colour once
+          // still applies to all of them.
           const own =
             inkMode === "per-tool" ||
-            (inkMode === "auto" && Boolean(PEN_BY_ID[t.active].defaultColor));
+            (inkMode === "auto" &&
+              !chosen.current &&
+              Boolean(PEN_BY_ID[t.active].defaultColor));
           if (own)
             setInks((m) => ({ ...m, [t.active as PenId]: p.color as string }));
           else setInk(p.color);

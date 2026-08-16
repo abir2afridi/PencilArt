@@ -465,6 +465,54 @@
   padding: 0 0.5rem;
 }
 
+/* The picker: a saturation/value field with the hue strip beside it. */
+.spectrum {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field,
+.hue {
+  position: relative;
+  border-radius: 8px;
+  /* Dragging across it must not scroll the page instead. */
+  touch-action: none;
+}
+
+/* Saturation across, value up. */
+.field {
+  width: 132px;
+  height: 56px;
+  cursor: crosshair;
+}
+
+/* The whole wheel, red at both ends. */
+.hue {
+  width: 14px;
+  height: 56px;
+  cursor: ns-resize;
+}
+
+/* The reading dot on each, ringed in whichever edge colour it sits on. */
+.fieldDot,
+.hueDot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  /* Centred on the value, not hung from it. */
+  translate: -50% -50%;
+  background: #fff;
+  border: 1.5px solid #111;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+.hueDot {
+  border-color: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
 /* A hex code you can type into. */
 .hex {
   position: relative;
