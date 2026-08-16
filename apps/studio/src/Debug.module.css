@@ -20,6 +20,22 @@
   position: relative;
 }
 
+/* Prev and next sit beside the Page dropdown, outside it. */
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* The chevron as left/right arrows. */
+.left {
+  transform: rotate(90deg);
+}
+
+.right {
+  transform: rotate(-90deg);
+}
+
 .trigger {
   display: inline-flex;
   align-items: baseline;

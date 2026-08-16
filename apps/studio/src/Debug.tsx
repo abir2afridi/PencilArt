@@ -189,7 +189,7 @@ export function Debug({
       >
         {label}
         {current ? <span className={css.current}>{current}</span> : null}
-        <ChevronDownIcon />
+        <ChevronIcon />
       </button>
       {open === id && (
         <div className={css.menu}>
@@ -221,34 +221,45 @@ export function Debug({
         {shell === "dark" ? <SunIcon /> : <MoonIcon />}
       </button>
 
-      <Dropdown
-        id="page"
-        label="Page"
-        current={`${page + 1} / ${pageCount}`}
-      >
-        <Toggle on={false} onClick={onNewPage}>
-          new
-        </Toggle>
-        <Toggle
-          on={false}
+      <div className={css.pager}>
+        <button
+          type="button"
+          className={css.chip}
+          aria-label="Previous page"
           disabled={page === 0}
           onClick={() => onGoPage(page - 1)}
         >
-          prev
-        </Toggle>
-        <Toggle
-          on={false}
+          <ChevronIcon className={css.left} />
+        </button>
+        <Dropdown
+          id="page"
+          label="Page"
+          current={`${page + 1} / ${pageCount}`}
+        >
+          {Array.from({ length: pageCount }, (_, i) => (
+            <Toggle key={i} on={i === page} onClick={() => onGoPage(i)}>
+              {i + 1}
+            </Toggle>
+          ))}
+        </Dropdown>
+        <button
+          type="button"
+          className={css.chip}
+          aria-label="Add a new page"
+          onClick={onNewPage}
+        >
+          <AddIcon />
+        </button>
+        <button
+          type="button"
+          className={css.chip}
+          aria-label="Next page"
           disabled={page >= pageCount - 1}
           onClick={() => onGoPage(page + 1)}
         >
-          next
-        </Toggle>
-        {Array.from({ length: pageCount }, (_, i) => (
-          <Toggle key={i} on={i === page} onClick={() => onGoPage(i)}>
-            {i + 1}
-          </Toggle>
-        ))}
-      </Dropdown>
+          <ChevronIcon className={css.right} />
+        </button>
+      </div>
 
       <Dropdown id="placement" label="Placement" current={value.placement}>
         {PLACEMENTS.map((p) => (
@@ -506,11 +517,32 @@ export function Debug({
   );
 }
 
-/** The chevron on every dropdown trigger; it flips when the menu opens. */
-function ChevronDownIcon() {
+/** The plus, for the one-click new page button. */
+function AddIcon() {
   return (
     <svg
-      className={css.chevron}
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5 12h14" />
+      <path d="M12 5v14" />
+    </svg>
+  );
+}
+
+/** The chevron on every dropdown trigger; it flips when the menu opens.
+    The page-turn arrows are the same chevron, rotated. */
+function ChevronIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={`${css.chevron} ${className ?? ""}`}
       width="12"
       height="12"
       viewBox="0 0 24 24"
