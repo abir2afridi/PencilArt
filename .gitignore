@@ -7,9 +7,16 @@ dist
 AGENTS.md
 CLAUDE.md
 
+#vscode
+.history/
+
 # Copied into the package at build time from the repo root, which is canonical.
 packages/draw/README.md
 packages/draw/LICENSE
 packages/draw/logo.svg
 packages/draw/logo-dark.svg
 .vercel
+
+docs/
+
+

@@ -54,6 +54,10 @@ export type StrokeShape = {
   simulatePressure?: boolean;
 };
 
+/** The SVG for a committed figure: its stroked outline, plus an optional
+    filled head (the arrow's). */
+export type FigureMarkup = { d: string; head?: string };
+
 /** One shape tool as offered in the tray. */
 export type ShapeDef = {
   kind: ShapeKind;
@@ -63,6 +67,12 @@ export type ShapeDef = {
   defaultSize: number;
   /** default stroke opacity (0–1) */
   defaultOpacity: number;
+  /** The outline to draw for a committed or in-progress figure. */
+  figure: (shape: Shape, size: number) => FigureMarkup;
+  /** How a Shift-held drag is constrained, given the signed drag deltas:
+      squares the rect and ellipse, and locks the line and arrow to the
+      nearest of the eight compass directions. */
+  snap: (w: number, h: number) => { w: number; h: number };
 };
 
 /** A committed figure: the bounding box of its two drag anchors. */
