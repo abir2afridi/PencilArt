@@ -10,18 +10,48 @@ export default function App() {
   /** Every page is its own drawing; the harness keeps the whole stack. */
   const [pages, setPages] = useState<Stroke[][]>([[]]);
   const [page, setPage] = useState(0);
+  /** The page being flipped away, if a turn is in flight. */
+  const [turning, setTurning] = useState<number | null>(null);
+  /** Which way the last switch went, so the page turns off that side. */
+  const [dir, setDir] = useState<"forward" | "back">("forward");
   const draw = useRef<DrawHandle>(null);
 
   /** A brand-new blank page, made current. */
   const addPage = () => {
+    if (turning !== null) return;
     const index = pages.length;
     setPages((prev) => [...prev, []]);
+    setDir("forward");
+    beginTurn(page);
     setPage(index);
   };
 
   const goPage = (index: number) => {
-    if (index >= 0 && index < pages.length) setPage(index);
+    if (index < 0 || index >= pages.length || index === page) return;
+    if (turning !== null) return;
+    setDir(index > page ? "forward" : "back");
+    beginTurn(page);
+    setPage(index);
   };
+
+  /** Send the current page away, and clear it once the flip has played.
+      The timeout is the belt-and-braces for reduced-motion, where the
+      animation (and its end event) never runs. */
+  const beginTurn = (from: number) => {
+    setTurning(from);
+    window.setTimeout(
+      () => setTurning((t) => (t === from ? null : t)),
+      900,
+    );
+  };
+
+  /* The canvas colour is the host's call, not the component's — but a dark
+     theme over a white page is nobody's intent. */
+  const background = debug.transparent
+    ? "checker"
+    : debug.theme === "dark"
+      ? "#17171a"
+      : "#ffffff";
 
   return (
     <div className={css.page}>
@@ -38,12 +68,13 @@ export default function App() {
           onGoPage={goPage}
         />
       </header>
-      <Draw
-        /* A new key per page remounts the component, so each page loads
-           its own strokes fresh instead of sharing undo history. */
-        key={page}
-        ref={draw}
-        initialStrokes={pages[page]}
+      {/* The book: the page you turned to rests beneath, and the page you left
+          flips over it like paper, pivoting on its spine edge. */}
+      <div className={css.book}>
+        <div key={page} className={css.stage}>
+          <Draw
+            ref={draw}
+            initialStrokes={pages[page]}
         onChange={(strokes) =>
           setPages((prev) => {
             const next = [...prev];
@@ -69,14 +100,22 @@ export default function App() {
         draggable={debug.draggable}
         /* The canvas colour is the host's call, not the component's —
            but a dark theme over a white page is nobody's intent. */
-        background={
-          debug.transparent
-            ? "checker"
-            : debug.theme === "dark"
-              ? "#17171a"
-              : "#ffffff"
-        }
-      />
+        background={background}
+        />
+        </div>
+        {/* The page being turned away: a bare snapshot, chrome off, so it
+            reads as paper with the drawing on it. */}
+        {turning !== null && (
+          <div key={turning} className={css.turning} data-dir={dir}>
+            <Draw
+              initialStrokes={pages[turning]}
+              theme={debug.theme}
+              chrome={false}
+              background={background}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

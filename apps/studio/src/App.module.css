@@ -36,10 +36,112 @@
   color: rgba(0, 0, 0, 0.6);
 }
 
-/* The Draw root is height: 100%, but inside the flex column it should take
-   whatever the header leaves over rather than the full viewport. */
-.page > .sd {
+/* The book: a flat stage that takes whatever the header leaves over, with
+   the perspective for the page turning inside it. */
+.book {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   height: auto;
+  overflow: hidden;
+  perspective: 2200px;
+}
+
+/* The settled page — the one you turned to. */
+.stage {
+  position: absolute;
+  inset: 0;
+}
+
+/* The page being turned away: it pivots on its spine edge like paper, and
+   fades at the instant it passes the vertical, when it is edge-on and the
+   fade is invisible — so it reads as landing flat on the other stack. */
+.turning {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  backface-visibility: hidden;
+  transform-origin: left center;
+  animation: turn-away 750ms cubic-bezier(0.4, 0.1, 0.2, 1) both;
+}
+
+.turning[data-dir="back"] {
+  transform-origin: right center;
+  animation-name: turn-away-back;
+}
+
+/* The shade the lifted page casts as it comes off the stack. */
+.turning::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.35),
+    rgba(0, 0, 0, 0) 60%
+  );
+  animation: turn-shade 750ms linear both;
+}
+
+.turning[data-dir="back"]::before {
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0.35),
+    rgba(0, 0, 0, 0) 60%
+  );
+}
+
+@keyframes turn-away {
+  0% {
+    transform: perspective(2200px) rotateY(0deg);
+    opacity: 1;
+  }
+  75% {
+    transform: perspective(2200px) rotateY(92deg);
+    opacity: 1;
+  }
+  100% {
+    transform: perspective(2200px) rotateY(92deg);
+    opacity: 0;
+  }
+}
+
+@keyframes turn-away-back {
+  0% {
+    transform: perspective(2200px) rotateY(0deg);
+    opacity: 1;
+  }
+  75% {
+    transform: perspective(2200px) rotateY(-92deg);
+    opacity: 1;
+  }
+  100% {
+    transform: perspective(2200px) rotateY(-92deg);
+    opacity: 0;
+  }
+}
+
+@keyframes turn-shade {
+  0% {
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turning,
+  .turning::before {
+    animation: none;
+  }
 }
