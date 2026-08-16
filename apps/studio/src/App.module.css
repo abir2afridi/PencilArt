@@ -36,11 +36,26 @@
   color: rgba(0, 0, 0, 0.6);
 }
 
-/* The header, then a row with the controls sidebar and the book. */
+/* The header, then a row with the controls sidebar and the book, framed as
+   one rounded card with the air of the page around it. */
 .body {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
+  margin: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.body[data-shell="light"] {
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+@media (max-width: 767px) {
+  .body {
+    flex-direction: column;
+  }
 }
 
 /* The book: a flat stage that takes whatever the header leaves over, with

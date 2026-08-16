@@ -90,7 +90,7 @@ export default function App() {
         />
       </header>
       {/* The controls down the left edge, and the book taking the rest. */}
-      <div className={css.body}>
+      <div className={css.body} data-shell={shell}>
         <Sidebar value={debug} onChange={setDebug} draw={draw} shell={shell} />
         <div className={css.book}>
         <div key={`page-${page}`} className={css.stage}>

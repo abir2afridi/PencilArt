@@ -32,3 +32,147 @@
   background: rgba(255, 255, 255, 0.8);
   color: rgba(0, 0, 0, 0.6);
 }
+
+/* The brand at the top of the rail: a pencil in a rounded box — dark ink in
+   the light shell, light ink in the dark one — and the name beside it. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.125rem 0.375rem 0.375rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar[data-shell="light"] .brand {
+  border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.375rem;
+  background: rgba(255, 255, 255, 0.92);
+  color: #141416;
+}
+
+.sidebar[data-shell="light"] .mark {
+  background: #141416;
+  color: #fff;
+}
+
+.wordmark {
+  font: 600 12px/1 "Inter", system-ui, sans-serif;
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.78);
+  white-space: nowrap;
+}
+
+.sidebar[data-shell="light"] .wordmark {
+  color: rgba(0, 0, 0, 0.78);
+}
+
+/* The thin bar that replaces the rail on small screens, and the button
+   that opens the drawer from it. */
+.mobilebar {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  height: 2.5rem;
+  padding: 0 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(20, 20, 22, 0.86);
+  -webkit-backdrop-filter: blur(0.75rem);
+  backdrop-filter: blur(0.75rem);
+}
+
+.mobilebar[data-shell="light"] {
+  border-bottom-color: rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.menubutton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.375rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+}
+
+.menubutton:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.mobilebar[data-shell="light"] .menubutton,
+.drawer[data-shell="light"] .menubutton {
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.mobilebar[data-shell="light"] .menubutton:hover,
+.drawer[data-shell="light"] .menubutton:hover {
+  background: rgba(0, 0, 0, 0.11);
+}
+
+/* The full-screen drawer, slid in from the left, with the brand and the
+   close cross on top and the controls beneath. */
+.drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  overflow-y: auto;
+  background: rgba(20, 20, 22, 0.97);
+  -webkit-backdrop-filter: blur(0.75rem);
+  backdrop-filter: blur(0.75rem);
+  animation: drawer-in 300ms ease both;
+}
+
+.drawer[data-shell="light"] {
+  background: rgba(255, 255, 255, 0.97);
+}
+
+.drawerTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.drawer .brand {
+  padding: 0;
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+    opacity: 0.6;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (max-width: 767px) {
+  .sidebar {
+    display: none;
+  }
+
+  .mobilebar {
+    display: flex;
+  }
+}

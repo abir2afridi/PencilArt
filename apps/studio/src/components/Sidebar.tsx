@@ -13,10 +13,64 @@ import { PlacementControl } from "./controls/Placement";
 import { SettingsControl } from "./controls/Settings";
 import { ThemeControl } from "./controls/Theme";
 import { ToolsControl } from "./controls/Tools";
+import { MenuIcon, XIcon } from "./icons";
 import css from "./Sidebar.module.css";
 
+/** The whole set of demo knobs, shared by the rail and the mobile drawer. */
+function Controls({
+  value,
+  onChange,
+  draw,
+}: {
+  value: DebugState;
+  onChange: (next: DebugState) => void;
+  draw: RefObject<DrawHandle | null>;
+}) {
+  return (
+    <>
+      <PlacementControl value={value} onChange={onChange} />
+      <ThemeControl value={value} onChange={onChange} />
+      <DepthControl value={value} onChange={onChange} />
+      <SettingsControl value={value} onChange={onChange} />
+      <AlignControl value={value} onChange={onChange} />
+      <ToolsControl value={value} onChange={onChange} />
+      <InkControl value={value} onChange={onChange} />
+      <ControlsControl value={value} onChange={onChange} />
+      <PensControl value={value} onChange={onChange} />
+      <MotionControl value={value} onChange={onChange} />
+      <AlsoControl value={value} onChange={onChange} />
+      <ExportControl draw={draw} />
+    </>
+  );
+}
+
+/** The brand: a pencil in a rounded box, with the name when there's room. */
+function Brand({ open }: { open: boolean }) {
+  return (
+    <div className={css.brand}>
+      <span className={css.mark}>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M17 3l4 4L8 20l-5 1 1-5L17 3Z" />
+        </svg>
+      </span>
+      {open ? <span className={css.wordmark}>PencilArt</span> : null}
+    </div>
+  );
+}
+
 /** The demo controls, stacked down the left edge instead of across the top.
-    The rail collapses to its glyphs; hovering it fans it out. */
+    The rail collapses to its glyphs; hovering it fans it out. On small
+    screens the rail steps aside for a drawer opened from a thin bar. */
 export function Sidebar({
   value,
   onChange,
@@ -29,6 +83,7 @@ export function Sidebar({
   shell: "dark" | "light";
 }) {
   const [open, setOpen] = useState(false);
+  const [drawer, setDrawer] = useState(false);
   const aside = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -52,27 +107,60 @@ export function Sidebar({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!drawer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawer(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [drawer]);
+
   return (
-    <aside
-      ref={aside}
-      className={css.sidebar}
-      data-sidebar
-      data-shell={shell}
-      data-open={open ? "true" : "false"}
-      onPointerEnter={() => setOpen(true)}
-    >
-      <PlacementControl value={value} onChange={onChange} />
-      <ThemeControl value={value} onChange={onChange} />
-      <DepthControl value={value} onChange={onChange} />
-      <SettingsControl value={value} onChange={onChange} />
-      <AlignControl value={value} onChange={onChange} />
-      <ToolsControl value={value} onChange={onChange} />
-      <InkControl value={value} onChange={onChange} />
-      <ControlsControl value={value} onChange={onChange} />
-      <PensControl value={value} onChange={onChange} />
-      <MotionControl value={value} onChange={onChange} />
-      <AlsoControl value={value} onChange={onChange} />
-      <ExportControl draw={draw} />
-    </aside>
+    <>
+      <aside
+        ref={aside}
+        className={css.sidebar}
+        data-sidebar
+        data-shell={shell}
+        data-open={open ? "true" : "false"}
+        onPointerEnter={() => setOpen(true)}
+      >
+        <Brand open={open} />
+        <Controls value={value} onChange={onChange} draw={draw} />
+      </aside>
+      {/* The thin bar on small screens, and the drawer it opens. */}
+      <div className={css.mobilebar} data-shell={shell}>
+        <button
+          type="button"
+          className={css.menubutton}
+          aria-label="Open controls"
+          onClick={() => setDrawer(true)}
+        >
+          <MenuIcon />
+        </button>
+      </div>
+      {drawer ? (
+        <div
+          className={css.drawer}
+          data-sidebar
+          data-shell={shell}
+          data-open="true"
+        >
+          <div className={css.drawerTop}>
+            <Brand open />
+            <button
+              type="button"
+              className={css.menubutton}
+              aria-label="Close controls"
+              onClick={() => setDrawer(false)}
+            >
+              <XIcon />
+            </button>
+          </div>
+          <Controls value={value} onChange={onChange} draw={draw} />
+        </div>
+      ) : null}
+    </>
   );
 }
