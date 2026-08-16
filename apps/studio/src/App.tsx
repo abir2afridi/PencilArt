@@ -12,6 +12,8 @@ export default function App() {
   const [page, setPage] = useState(0);
   /** The page being flipped away, if a turn is in flight. */
   const [turning, setTurning] = useState<number | null>(null);
+  /** The strokes the turning page flips away with, captured at turn time. */
+  const [turnStrokes, setTurnStrokes] = useState<Stroke[]>([]);
   /** Which way the last switch went, so the page turns off that side. */
   const [dir, setDir] = useState<"forward" | "back">("forward");
   const draw = useRef<DrawHandle>(null);
@@ -22,7 +24,7 @@ export default function App() {
     const index = pages.length;
     setPages((prev) => [...prev, []]);
     setDir("forward");
-    beginTurn(page);
+    beginTurn(page, pages[page]);
     setPage(index);
   };
 
@@ -30,14 +32,27 @@ export default function App() {
     if (index < 0 || index >= pages.length || index === page) return;
     if (turning !== null) return;
     setDir(index > page ? "forward" : "back");
-    beginTurn(page);
+    beginTurn(page, pages[page]);
     setPage(index);
   };
 
-  /** Send the current page away, and clear it once the flip has played.
-      The timeout is the belt-and-braces for reduced-motion, where the
-      animation (and its end event) never runs. */
-  const beginTurn = (from: number) => {
+  /** Turn the current page away for good. The last page can't go. */
+  const removePage = () => {
+    if (turning !== null || pages.length <= 1) return;
+    const index = page;
+    const removed = pages[index];
+    const next = pages.filter((_, i) => i !== index);
+    setDir(next.length - 1 < index ? "back" : "forward");
+    beginTurn(index, removed);
+    setPages(next);
+    setPage(Math.min(index, next.length - 1));
+  };
+
+  /** Send a page away, and clear it once the flip has played. The timeout
+      is the belt-and-braces for reduced-motion, where the animation (and
+      its end event) never runs. */
+  const beginTurn = (from: number, strokes: Stroke[]) => {
+    setTurnStrokes(strokes);
     setTurning(from);
     window.setTimeout(
       () => setTurning((t) => (t === from ? null : t)),
@@ -62,16 +77,17 @@ export default function App() {
           draw={draw}
           shell={shell}
           onShell={setShell}
-          page={page}
+page={page}
           pageCount={pages.length}
           onNewPage={addPage}
           onGoPage={goPage}
+          onRemovePage={removePage}
         />
       </header>
-      {/* The book: the page you turned to rests beneath, and the page you left
-          flips over it like paper, pivoting on its spine edge. */}
+      {/* The book: the page you turned to rests beneath, and the page you
+          left flips over it like paper, pivoting on its spine edge. */}
       <div className={css.book}>
-        <div key={page} className={css.stage}>
+        <div key={`page-${page}`} className={css.stage}>
           <Draw
             ref={draw}
             initialStrokes={pages[page]}
@@ -106,9 +122,9 @@ export default function App() {
         {/* The page being turned away: a bare snapshot, chrome off, so it
             reads as paper with the drawing on it. */}
         {turning !== null && (
-          <div key={turning} className={css.turning} data-dir={dir}>
+          <div key={`turn-${turning}`} className={css.turning} data-dir={dir}>
             <Draw
-              initialStrokes={pages[turning]}
+              initialStrokes={turnStrokes}
               theme={debug.theme}
               chrome={false}
               background={background}
