@@ -16,6 +16,9 @@ export default function App() {
   const [turnStrokes, setTurnStrokes] = useState<Stroke[]>([]);
   /** Which way the last switch went, so the page turns off that side. */
   const [dir, setDir] = useState<"forward" | "back">("forward");
+  /** Whether the current page has undo/redo available, refreshed with every
+      stroke change so the header buttons can be disabled honestly. */
+  const [hist, setHist] = useState({ canUndo: false, canRedo: false });
   const draw = useRef<DrawHandle>(null);
 
   /** A brand-new blank page, made current. */
@@ -82,6 +85,10 @@ page={page}
           onNewPage={addPage}
           onGoPage={goPage}
           onRemovePage={removePage}
+          canUndo={hist.canUndo}
+          canRedo={hist.canRedo}
+          onUndo={() => draw.current?.undo()}
+          onRedo={() => draw.current?.redo()}
         />
       </header>
       {/* The book: the page you turned to rests beneath, and the page you
@@ -91,13 +98,18 @@ page={page}
           <Draw
             ref={draw}
             initialStrokes={pages[page]}
-        onChange={(strokes) =>
+        onChange={(strokes) => {
           setPages((prev) => {
             const next = [...prev];
             next[page] = strokes;
             return next;
-          })
-        }
+          });
+          const h = draw.current;
+          setHist({
+            canUndo: h?.canUndo() ?? false,
+            canRedo: h?.canRedo() ?? false,
+          });
+        }}
         placement={debug.placement}
         theme={debug.theme}
         chrome={debug.chrome}

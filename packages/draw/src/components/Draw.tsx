@@ -65,6 +65,10 @@ export type DrawHandle = {
   ) => Promise<void>;
   getStrokes: () => Stroke[];
   setStrokes: (strokes: Stroke[]) => void;
+  /** Whether there's anything to undo. */
+  canUndo: () => boolean;
+  /** Whether there's anything to redo. */
+  canRedo: () => boolean;
   undo: () => void;
   redo: () => void;
   clear: () => void;
@@ -371,6 +375,8 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
       },
       getStrokes: () => drawing.strokes,
       setStrokes: (next) => drawing.commit(next),
+      canUndo: () => drawing.canUndo,
+      canRedo: () => drawing.canRedo,
       undo: drawing.undo,
       redo: drawing.redo,
       clear: drawing.clear,

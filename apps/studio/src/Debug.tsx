@@ -110,6 +110,10 @@ export function Debug({
   onNewPage,
   onGoPage,
   onRemovePage,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: {
   value: DebugState;
   onChange: (next: DebugState) => void;
@@ -126,6 +130,12 @@ export function Debug({
   onGoPage: (index: number) => void;
   /** Turn the current page away for good. */
   onRemovePage: () => void;
+  /** Whether the page has anything to step back over. */
+  canUndo: boolean;
+  /** Whether a step back can be taken again. */
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }) {
   const set = <K extends keyof DebugState>(k: K, v: DebugState[K]) =>
     onChange({ ...value, [k]: v });
@@ -225,6 +235,24 @@ export function Debug({
       </button>
 
       <div className={css.pager}>
+        <button
+          type="button"
+          className={css.chip}
+          aria-label="Undo"
+          disabled={!canUndo}
+          onClick={onUndo}
+        >
+          <UndoIcon />
+        </button>
+        <button
+          type="button"
+          className={css.chip}
+          aria-label="Redo"
+          disabled={!canRedo}
+          onClick={onRedo}
+        >
+          <RedoIcon />
+        </button>
         <button
           type="button"
           className={css.chip}
@@ -526,6 +554,46 @@ export function Debug({
         </button>
       </Dropdown>
     </div>
+  );
+}
+
+/** The undo arrow, for stepping back over a gesture. */
+function UndoIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 7v6h6" />
+      <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+    </svg>
+  );
+}
+
+/** The redo arrow, mirrored. */
+function RedoIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 7v6h-6" />
+      <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
+    </svg>
   );
 }
 
