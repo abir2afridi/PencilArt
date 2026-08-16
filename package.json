@@ -1,0 +1,14 @@
+{
+  "name": "pencilart-monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter pencilart-studio dev",
+    "build": "pnpm --filter pencilart build && pnpm --filter pencilart-studio build",
+    "build:packages": "pnpm --filter pencilart build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

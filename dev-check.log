@@ -1,0 +1,8 @@
+
+> pencilart-monorepo@ dev D:\GitHub Project\PencilArt
+> pnpm --filter pencilart-studio dev
+
+
+> pencilart-studio@0.1.0 dev D:\GitHub Project\PencilArt\apps\studio
+> vite
+
