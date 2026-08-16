@@ -8,15 +8,19 @@ import {
   useState,
 } from "react";
 import { PENS, PEN_BY_ID } from "../engine/pens";
+import { SHAPES, SHAPE_BY_ID, isShape } from "../engine/shapes";
 import { toPng, toSvg } from "../engine/serialize";
 import type { TooltipOptions } from "./Tooltip";
-import type { Board, PenId, Stroke, ToolId } from "../engine/types";
+import type { Board, PenId, ShapeKind, Stroke, ToolId } from "../engine/types";
 import { useDrawing } from "../hooks/use-drawing";
 import { DrawSurface, type Tool } from "./DrawSurface";
 import { Toolbar, type ToolState } from "./Toolbar";
-import { ToolIcon } from "./ToolIcon";
+import { ShapeIcon, ToolIcon } from "./ToolIcon";
 import css from "./Draw.module.css";
 import "./tokens.css";
+
+/** Every shape tool, in tray order. */
+const ALL_SHAPES = SHAPES.map((s) => s.kind);
 
 /** Which of the built-in controls the toolbar offers. */
 export type DrawControls = {
@@ -72,6 +76,8 @@ export type DrawHandle = {
   undo: () => void;
   redo: () => void;
   clear: () => void;
+  /** Pick up a tool, exactly as if it were clicked in the tray. */
+  selectTool: (id: ToolId) => void;
   /** The surface size the drawing is being made at. */
   getSize: () => Board;
 };
@@ -98,6 +104,8 @@ export type DrawProps = {
   /** Strokes to start from. */
   initialStrokes?: Stroke[];
   onChange?: (strokes: Stroke[]) => void;
+  /** Fired with the tool state whenever the tool in hand changes. */
+  onToolChange?: (tool: ToolState) => void;
   /** Turn the built-in chrome off and drive it yourself. */
   chrome?: boolean;
   /**
@@ -128,8 +136,11 @@ export type DrawProps = {
   swatches?: string[];
   /** Hover labels. */
   tooltips?: boolean | TooltipOptions;
-  /** Which tools appear, and in what order. */
-  tools?: PenId[];
+  /** Which tools appear, and in what order. Pens and shapes can be mixed. */
+  tools?: (PenId | ShapeKind)[];
+  /** The shape tools in the tray, after the pens. An empty array hides the
+   *  whole row — useful when a host offers the shapes in its own chrome. */
+  shapes?: ShapeKind[];
   /** Whether the eraser is offered. */
   eraser?: boolean;
   /** Which of the built-in controls to show. All of them by default. */
@@ -157,6 +168,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
     background = "#ffffff",
     initialStrokes,
     onChange,
+    onToolChange,
     chrome = true,
     motion,
     placement = "bottom",
@@ -169,6 +181,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
     swatches,
     tooltips = true,
     tools,
+    shapes,
     eraser = true,
     controls,
     settings = "bar",
@@ -223,8 +236,21 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
 
   /** The pens on offer, in the order asked for. */
   const pens = useMemo(
-    () => (tools ? tools.map((id) => PEN_BY_ID[id]).filter(Boolean) : PENS),
+    () =>
+      tools
+        ? tools
+            .filter((id): id is PenId => !isShape(id))
+            .map((id) => PEN_BY_ID[id])
+        : PENS,
     [tools],
+  );
+
+  /** The shape tools on offer, in the order asked for. A `shapes` prop wins;
+    otherwise the tools list decides, and everything is offered without one. */
+  const shapeTools = useMemo(
+    () =>
+      shapes ?? (tools ? tools.filter(isShape) : ALL_SHAPES),
+    [tools, shapes],
   );
 
   // Report changes without making the caller own the state.
@@ -233,6 +259,13 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
   useEffect(() => {
     changed.current?.(drawing.strokes);
   }, [drawing.strokes]);
+
+  // Report the tool in hand the same way, so a host can mirror it elsewhere.
+  const reportedTool = useRef(onToolChange);
+  reportedTool.current = onToolChange;
+  useEffect(() => {
+    reportedTool.current?.(tool);
+  }, [tool]);
 
   /** The ink each pen was last used in. */
   const [inks, setInks] = useState<Partial<Record<PenId, string>>>({});
@@ -283,6 +316,18 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
   const select = useCallback(
     (id: ToolId) => {
       if (id === "eraser") return setTool((t) => ({ ...t, active: "eraser" }));
+      // A shape has no settings of its own and no per-tool memory: it always
+      // opens at its default width in the current ink.
+      if (isShape(id)) {
+        const def = SHAPE_BY_ID[id];
+        return setTool((t) => ({
+          ...t,
+          active: id,
+          size: def.defaultSize,
+          opacity: def.defaultOpacity,
+          color: inkFor("pen"),
+        }));
+      }
       const preset = PEN_BY_ID[id];
       // Whatever you last set this pen to, or its default if you never have.
       // Sizes belong to the tool, not to the toolbar: a highlighter set broad
@@ -313,12 +358,17 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
             inkMode === "per-tool" ||
             (inkMode === "auto" &&
               !chosen.current &&
+              !isShape(t.active) &&
               Boolean(PEN_BY_ID[t.active].defaultColor));
           if (own)
             setInks((m) => ({ ...m, [t.active as PenId]: p.color as string }));
           else setInk(p.color);
         }
-        if ((p.size !== undefined || p.opacity !== undefined) && t.active !== "eraser") {
+        if (
+          (p.size !== undefined || p.opacity !== undefined) &&
+          t.active !== "eraser" &&
+          !isShape(t.active)
+        ) {
           const id = t.active as PenId;
           tuned.current[id] = {
             size: p.size ?? t.size,
@@ -346,6 +396,11 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
           ...t,
           eraserSize: Math.max(1, Math.min(120, t.eraserSize + delta)),
         };
+      }
+      // A shape's size comes back from the defaults when it's picked again,
+      // so there's nothing per-tool to tune here.
+      if (isShape(t.active)) {
+        return { ...t, size: Math.max(1, Math.min(80, t.size + delta)) };
       }
       const size = Math.max(1, Math.min(80, t.size + delta));
       tuned.current[t.active] = { size, opacity: t.opacity };
@@ -387,21 +442,29 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
       undo: drawing.undo,
       redo: drawing.redo,
       clear: drawing.clear,
+      selectTool: select,
       getSize: () => surfaceBoard,
     };
-  }, [drawing, surfaceBoard, background]);
+  }, [drawing, surfaceBoard, background, select]);
 
   const surfaceTool: Tool = useMemo(
     () =>
       tool.active === "eraser"
         ? { kind: "eraser", size: tool.eraserSize }
-        : {
-            kind: "pen",
-            pen: tool.active,
-            color: tool.color,
-            size: tool.size,
-            opacity: tool.opacity,
-          },
+        : isShape(tool.active)
+          ? {
+              kind: tool.active,
+              color: tool.color,
+              size: tool.size,
+              opacity: tool.opacity,
+            }
+          : {
+              kind: "pen",
+              pen: tool.active,
+              color: tool.color,
+              size: tool.size,
+              opacity: tool.opacity,
+            },
     [tool],
   );
 
@@ -433,6 +496,8 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
       if (k === "]") return nudgeSize(1);
       const pen = pens.find((p) => p.key === k);
       if (pen) select(pen.id);
+      const shape = SHAPES.find((s) => s.key === k);
+      if (shape) select(shape.kind);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -733,23 +798,28 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
                the margin it keeps from the corner. The disc ends up 56 across
                whichever way the bar is laid, so this is the same either way. */
             icon={
-              <ToolIcon
-                id={tool.active === "eraser" ? "eraser" : tool.active}
-                color={tool.color}
-                /* The same pen the row was holding, so it has to be drawn the
-                   same way. Left off, the tool changed style as the bar closed
-                   around it — the one moment it's the only thing on screen. */
-                look={look}
-                /* Drawn at 42 because the disc it sits in is the bar scaled to
-                   two thirds — which takes the tool down with it. This lands
-                   it back at the 28 it reads as. */
-                size={42}
-              />
+              isShape(tool.active) ? (
+                <ShapeIcon kind={tool.active} color={tool.color} size={42} />
+              ) : (
+                <ToolIcon
+                  id={tool.active === "eraser" ? "eraser" : tool.active}
+                  color={tool.color}
+                  /* The same pen the row was holding, so it has to be drawn the
+                     same way. Left off, the tool changed style as the bar closed
+                     around it — the one moment it's the only thing on screen. */
+                  look={look}
+                  /* Drawn at 42 because the disc it sits in is the bar scaled to
+                     two thirds — which takes the tool down with it. This lands
+                     it back at the 28 it reads as. */
+                  size={42}
+                />
+              )
             }
             tool={tool}
             inkFor={inkFor}
             tooltips={tooltips}
             pens={pens}
+            shapes={shapeTools}
             eraser={eraser}
             controls={controls}
             settings={settings}

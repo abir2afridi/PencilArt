@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PENS } from "../engine/pens";
-import type { Pen, PenId, ToolId } from "../engine/types";
+import { SHAPES, SHAPE_BY_ID } from "../engine/shapes";
+import type { Pen, PenId, ShapeKind, ToolId } from "../engine/types";
 import { resolveSwatches } from "../palette";
 import { MorphBar } from "./MorphBar";
 import { BarSlider } from "./BarSlider";
@@ -13,7 +14,7 @@ import {
 } from "./icons";
 import { HexField, pickFromScreen, supportsEyeDropper } from "./HexField";
 import { Spectrum } from "./Spectrum";
-import { ToolIcon } from "./ToolIcon";
+import { ShapeIcon, ToolIcon } from "./ToolIcon";
 import { ToolMenu } from "./ToolMenu";
 import { useTooltips, type TooltipOptions } from "./Tooltip";
 import { TrashIcon } from "./TrashIcon";
@@ -29,6 +30,9 @@ export type ToolState = {
 };
 
 type Mode = "tools" | "ink" | "brush" | "spectrum";
+
+/** Every shape tool, in tray order. */
+const ALL_SHAPES = SHAPES.map((s) => s.kind);
 
 /** Rough perceptual lightness, to pick a legible tick colour on a swatch. */
 function isLight(hex: string) {
@@ -48,6 +52,7 @@ export function Toolbar({
   inkFor,
   tooltips = true,
   pens = PENS,
+  shapes = ALL_SHAPES,
   eraser = true,
   controls,
   settings = "bar",
@@ -79,6 +84,8 @@ export function Toolbar({
   tooltips?: boolean | TooltipOptions;
   /** The pens to offer, in tray order. */
   pens?: Pen[];
+  /** The shape tools to offer, in tray order, after the pens. */
+  shapes?: ShapeKind[];
   /** Whether the eraser is offered. */
   eraser?: boolean;
   /** Where size and opacity live. */
@@ -311,6 +318,31 @@ export function Toolbar({
                     />
                   </button>
                 ))}
+
+                {shapes.length > 0 && <span className={css.divider} />}
+
+                {shapes.map((kind) => {
+                  const def = SHAPE_BY_ID[kind];
+                  return (
+                    <button
+                      key={kind}
+                      type="button"
+                      className={css.tool}
+                      data-active={tool.active === kind || undefined}
+                      onClick={() => {
+                        // Shapes have no per-tool settings, so a second click
+                        // just re-selects; the menu belongs to the pens.
+                        if (openTool) closeMenu();
+                        onSelect(kind);
+                      }}
+                      aria-label={def.name}
+                      aria-pressed={tool.active === kind}
+                      {...tip.bind(def.name, shortcuts ? def.key : undefined)}
+                    >
+                      <ShapeIcon kind={kind} color={inkFor("pen")} size={30} />
+                    </button>
+                  );
+                })}
 
                 {eraser && (
                   <button

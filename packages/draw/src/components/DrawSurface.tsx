@@ -7,13 +7,15 @@ import {
 } from "react";
 import {
   dotRadius,
+  anchorsToShape,
   eraseLayers,
+  figureMarkup,
   nextId,
   polylinePath,
   strokePath,
 } from "../engine/geometry";
 import { PEN_BY_ID } from "../engine/pens";
-import type { Board, Point } from "../engine/types";
+import type { Board, Point, ShapeKind } from "../engine/types";
 import type { DrawingController } from "../hooks/use-drawing";
 
 export type Tool =
@@ -25,7 +27,13 @@ export type Tool =
       opacity: number;
       shape?: import("../engine/types").StrokeShape;
     }
-  | { kind: "eraser"; size: number };
+  | { kind: "eraser"; size: number }
+  | {
+      kind: ShapeKind;
+      color: string;
+      size: number;
+      opacity: number;
+    };
 
 export type DrawSurfaceProps = {
   drawing: DrawingController;
@@ -156,14 +164,31 @@ export function DrawSurface({
 
     if (!drawingNow.current || e.pointerId !== activePointer.current) return;
 
+    const pts = pointsRef.current;
+    const pressure = e.pressure || 0.5;
+
+    // A figure is a drag between two anchors, not a traced path: the preview
+    // grows from where the pointer went down and is redrawn each move. Shift
+    // holds it to a square or to the eight compass points.
+    if (tool.kind !== "pen" && tool.kind !== "eraser") {
+      const start = pts[0];
+      if (!start) return;
+      const end: Point = [x, y, pressure];
+      if (e.shiftKey) {
+        const shape = anchorsToShape(tool.kind, start, end, true);
+        end[0] = shape.w === 0 ? start[0] : shape.x + shape.w;
+        end[1] = shape.h === 0 ? start[1] : shape.y + shape.h;
+      }
+      pointsRef.current = [start, end];
+      setCurrent([start, end]);
+      return;
+    }
+
     // Anything other than the flat default means the hardware is really
     // measuring it. Pens that report a constant 0.5 are treated as pressureless.
     if (e.pointerType === "pen" && e.pressure > 0 && e.pressure !== 0.5) {
       realPressure.current = true;
     }
-
-    const pts = pointsRef.current;
-    const pressure = e.pressure || 0.5;
 
     if (e.shiftKey) {
       /*
@@ -244,6 +269,34 @@ export function DrawSurface({
     setCurrent([]);
     if (!pts.length) return;
 
+    // A figure commits its two anchors and the box they describe; a tap with
+    // no drag still deserves a dot-sized square or circle.
+    if (tool.kind !== "pen" && tool.kind !== "eraser") {
+      const a = pts[0];
+      const b = pts[pts.length - 1] ?? a;
+      let figure = anchorsToShape(tool.kind, a, b);
+      if (
+        Math.hypot(b[0] - a[0], b[1] - a[1]) < 1 &&
+        (tool.kind === "rect" || tool.kind === "ellipse")
+      ) {
+        const d = Math.max(12, tool.size * 2.5);
+        figure = { kind: tool.kind, x: a[0] - d / 2, y: a[1] - d / 2, w: d, h: d };
+      }
+      drawing.commit([
+        ...drawing.strokes,
+        {
+          id: nextId(),
+          pen: "pen" as const,
+          color: tool.color,
+          size: tool.size,
+          opacity: tool.opacity,
+          points: pts,
+          figure,
+        },
+      ]);
+      return;
+    }
+
     drawing.commit([
       ...drawing.strokes,
       tool.kind === "eraser"
@@ -279,8 +332,21 @@ export function DrawSurface({
       })),
       ink: layer.ink.map((i) => {
         const st = all[i];
+        if (st.figure) {
+          const { d, head } = figureMarkup(st.figure, st.size);
+          return {
+            id: st.id,
+            kind: "figure" as const,
+            d,
+            head,
+            width: st.size,
+            color: st.color,
+            opacity: st.opacity,
+          };
+        }
         return {
           id: st.id,
+          kind: "stroke" as const,
           d: strokePath(st.pen, st.size, st.points, true, st.shape),
           color: st.color,
           opacity: st.opacity,
@@ -423,7 +489,16 @@ export function DrawSurface({
                   </defs>
                 )}
                 {layer.ink.map((s) =>
-                  s.d ? (
+                  s.kind === "figure" ? (
+                    <FigureShape
+                      key={s.id}
+                      d={s.d}
+                      head={s.head}
+                      width={s.width}
+                      color={s.color}
+                      opacity={s.opacity}
+                    />
+                  ) : s.d ? (
                     <path
                       key={s.id}
                       d={s.d}
@@ -462,6 +537,25 @@ export function DrawSurface({
               }
             />
           )}
+
+          {tool.kind !== "pen" &&
+            tool.kind !== "eraser" &&
+            current.length > 1 &&
+            (() => {
+              const { d, head } = figureMarkup(
+                anchorsToShape(tool.kind, current[0], current[1]),
+                tool.size,
+              );
+              return (
+                <FigureShape
+                  d={d}
+                  head={head}
+                  width={tool.size}
+                  color={tool.color}
+                  opacity={tool.opacity}
+                />
+              );
+            })()}
         </g>
 
         {/* Kept mounted and faded, so crossing onto the toolbar is a soft
@@ -482,6 +576,38 @@ export function DrawSurface({
         )}
       </g>
     </svg>
+  );
+}
+
+/**
+ * A geometric figure, drawn the way an outline is on paper: a stroked shaft
+ * at the tool's width, and a filled head on top for an arrow.
+ */
+function FigureShape({
+  d,
+  head,
+  width,
+  color,
+  opacity,
+}: {
+  d: string;
+  head?: string;
+  width: number;
+  color: string;
+  opacity: number;
+}) {
+  return (
+    <g opacity={opacity}>
+      <path
+        d={d}
+        fill="none"
+        stroke={color}
+        strokeWidth={width}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {head ? <path d={head} fill={color} /> : null}
+    </g>
   );
 }
 

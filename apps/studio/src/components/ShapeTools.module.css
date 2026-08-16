@@ -1,0 +1,51 @@
+/* The shape tools, a row of chips in the header. Same glass recipe as the
+   theme toggle; the one in hand reads as the pressed key. */
+.row {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tool {
+  display: grid;
+  place-items: center;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.tool:hover {
+  background: rgba(255, 255, 255, 0.13);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.tool[data-active] {
+  background: #fff;
+  color: #111;
+}
+
+[data-shell="light"] .row {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+[data-shell="light"] .tool {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+[data-shell="light"] .tool:hover {
+  background: rgba(0, 0, 0, 0.11);
+  color: rgba(0, 0, 0, 0.85);
+}
+
+[data-shell="light"] .tool[data-active] {
+  background: #111;
+  color: #fff;
+}

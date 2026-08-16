@@ -1,4 +1,4 @@
-import type { InkMode, PenId } from "pencilart";
+import type { InkMode, PenId, ShapeKind } from "pencilart";
 
 /**
  * The demo harness's state. Everything here maps to exactly one `Draw` prop,
@@ -21,7 +21,7 @@ export type DebugState = {
   transparent: boolean;
   draggable: boolean;
   /** Empty means "all of them". */
-  tools: PenId[];
+  tools: (PenId | ShapeKind)[];
   controls: {
     color: boolean;
     size: boolean;

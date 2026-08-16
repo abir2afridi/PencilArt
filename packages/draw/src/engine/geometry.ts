@@ -1,6 +1,6 @@
 import { getStroke } from "./freehand";
 import { PEN_BY_ID } from "./pens";
-import type { PenId, Point, StrokeShape } from "./types";
+import type { PenId, Point, Shape, ShapeKind, StrokeShape } from "./types";
 
 /** Turn a stroke's rings into an SVG path. */
 export function getSvgPathFromStroke(rings: number[][][]): string {
@@ -91,6 +91,99 @@ export function polylinePath(points: Point[]): string {
   const last = points[points.length - 1];
   d += ` L${r(last[0])} ${r(last[1])}`;
   return d;
+}
+
+/**
+ * The two anchors of a figure drag, normalised into a `Shape`. When `straight`
+ * is held, rectangles and ellipses are constrained to a square, and lines and
+ * arrows to the nearest of the eight compass directions.
+ */
+export function anchorsToShape(
+  kind: ShapeKind,
+  a: Point,
+  b: Point,
+  straight = false,
+): Shape {
+  let w = b[0] - a[0];
+  let h = b[1] - a[1];
+
+  if (straight) {
+    if (kind === "rect" || kind === "ellipse") {
+      // The longer leg rules, the way a camera's crop square behaves.
+      const s = Math.max(Math.abs(w), Math.abs(h));
+      w = Math.sign(w || 1) * s;
+      h = Math.sign(h || 1) * s;
+    } else {
+      const len = Math.hypot(w, h);
+      if (len > 0) {
+        const heading =
+          (Math.round(Math.atan2(h, w) / (Math.PI / 4)) * Math.PI) / 4;
+        w = Math.cos(heading) * len;
+        h = Math.sin(heading) * len;
+      }
+    }
+  }
+
+  return {
+    kind,
+    x: w < 0 ? a[0] + w : a[0],
+    y: h < 0 ? a[1] + h : a[1],
+    w: Math.abs(w),
+    h: Math.abs(h),
+  };
+}
+
+/**
+ * The SVG markup for a figure: the stroked outline, and for an arrow the
+ * filled head that sits on top of it.
+ */
+export function figureMarkup(
+  shape: Shape,
+  size: number,
+): { d: string; head?: string } {
+  const { kind, x, y, w, h } = shape;
+
+  switch (kind) {
+    case "rect":
+      return { d: `M${r(x)} ${r(y)}h${r(w)}v${r(h)}h${r(-w)}Z` };
+
+    case "ellipse": {
+      const rx = w / 2;
+      const ry = h / 2;
+      const cx = x + rx;
+      const cy = y + ry;
+      return {
+        d: `M${r(cx - rx)} ${r(cy)}a${r(rx)} ${r(ry)} 0 1 0 ${r(rx * 2)} 0` +
+          `a${r(rx)} ${r(ry)} 0 1 0 ${r(-rx * 2)} 0Z`,
+      };
+    }
+
+    case "line":
+      return { d: `M${r(x)} ${r(y)}L${r(x + w)} ${r(y + h)}` };
+
+    case "arrow": {
+      const ex = x + w;
+      const ey = y + h;
+      const len = Math.hypot(w, h);
+      // Too short to carry a head reads as a plain line.
+      if (len < size * 4) return { d: `M${r(x)} ${r(y)}L${r(ex)} ${r(ey)}` };
+      const ang = Math.atan2(h, w);
+      // The head's length and the base it stands on: the shaft stops short of
+      // the tip so its round cap stays inside the head instead of poking out.
+      const head = Math.min(Math.max(size * 3, 14), len * 0.4);
+      const bx = ex - Math.cos(ang) * head * 0.6;
+      const by = ey - Math.sin(ang) * head * 0.6;
+      const spread = 2.62; // 150° either way
+      const w1x = ex + Math.cos(ang - spread) * head;
+      const w1y = ey + Math.sin(ang - spread) * head;
+      const w2x = ex + Math.cos(ang + spread) * head;
+      const w2y = ey + Math.sin(ang + spread) * head;
+      return {
+        d: `M${r(x)} ${r(y)}L${r(bx)} ${r(by)}`,
+        head: `M${r(ex)} ${r(ey)}L${r(w1x)} ${r(w1y)}L${r(w2x)} ${r(w2y)}Z`,
+      };
+    }
+  }
 }
 
 /**

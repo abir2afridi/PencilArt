@@ -1,16 +1,19 @@
 // Engine
 export { PENS, PEN_BY_ID } from "./engine/pens";
+export { SHAPES, SHAPE_BY_ID, isShape } from "./engine/shapes";
 export { getStroke } from "./engine/freehand";
 export type { FreehandOptions } from "./engine/freehand";
 export {
+  anchorsToShape,
   dotRadius,
   eraseLayers,
+  figureMarkup,
   nextId,
   polylinePath,
   strokePath,
 } from "./engine/geometry";
 export { toPng, toSvg } from "./engine/serialize";
-// The ceilings, so a host can check its own palette against them.
+// The ceilings, so a host can check its own palette against it.
 export {
   MAX_SWATCHES,
   MAX_SWATCHES_COMPACT,
@@ -22,6 +25,9 @@ export type {
   Pen,
   PenId,
   Point,
+  Shape,
+  ShapeDef,
+  ShapeKind,
   Stroke,
   StrokeShape,
   ToolId,
@@ -46,7 +52,7 @@ export { DrawSurface } from "./components/DrawSurface";
 /** The bar on its own, for hosts laying the pieces out themselves. */
 export { Toolbar } from "./components/Toolbar";
 /** The drawn tools, for the disc a standalone toolbar collapses into. */
-export { ToolIcon } from "./components/ToolIcon";
+export { ShapeIcon, ToolIcon } from "./components/ToolIcon";
 export type { ToolIconId } from "./components/ToolIcon";
 export type { ToolState } from "./components/Toolbar";
 export type { DrawSurfaceProps, Tool } from "./components/DrawSurface";

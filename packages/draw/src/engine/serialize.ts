@@ -1,4 +1,4 @@
-import { dotRadius, eraseLayers, polylinePath, strokePath } from "./geometry";
+import { dotRadius, eraseLayers, figureMarkup, polylinePath, strokePath } from "./geometry";
 import { PEN_BY_ID } from "./pens";
 import type { Stroke } from "./types";
 
@@ -16,6 +16,19 @@ export function esc(value: string): string {
  * stroke was too short to produce one (a tap).
  */
 function strokeMarkup(stroke: Stroke): string {
+  // A geometric figure is drawn stroked, like an outline on paper, with the
+  // arrow's head filled in solid.
+  if (stroke.figure) {
+    const { d, head } = figureMarkup(stroke.figure, stroke.size);
+    return (
+      `<g opacity="${stroke.opacity}">` +
+      `<path d="${d}" stroke="${esc(stroke.color)}" stroke-width="${stroke.size}"` +
+      ` fill="none" stroke-linecap="round" stroke-linejoin="round"/>` +
+      (head ? `<path d="${head}" fill="${esc(stroke.color)}"/>` : "") +
+      `</g>`
+    );
+  }
+
   const style =
     PEN_BY_ID[stroke.pen].blend === "multiply"
       ? ` style="mix-blend-mode:multiply"`

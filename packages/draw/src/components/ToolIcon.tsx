@@ -1,5 +1,5 @@
 import { useId } from "react";
-import type { PenId } from "../engine/types";
+import type { PenId, ShapeKind } from "../engine/types";
 
 /**
  * The implements themselves, drawn upright so they can sit in a tray with
@@ -671,3 +671,51 @@ const TOOLS: Record<ToolIconId, (p: Parts) => React.ReactElement> = {
   fountain: Calligraphy,
   eraser: Eraser,
 };
+
+const GLYPHS: Record<ShapeKind, React.ReactElement> = {
+  rect: (
+    <path d="M6 23a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v20a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4Z" />
+  ),
+  ellipse: (
+    <path d="M15 19a11 13 0 1 0 0 28a11 13 0 1 0 0-28Z" />
+  ),
+  line: <path d="M8 52L22 26" />,
+  arrow: (
+    <>
+      <path d="M7 51L20 38" />
+      <path d="M15 38h5v5" />
+    </>
+  ),
+};
+
+/**
+ * The shape tools' tray glyphs, drawn at the same footprint as the pens so
+ * they sit in the same slots. The figure is a plain outline in the current
+ * ink, the way the mark itself will be.
+ */
+export function ShapeIcon({
+  kind,
+  color,
+  size = 30,
+}: {
+  kind: ShapeKind;
+  color: string;
+  size?: number;
+}) {
+  return (
+    <svg
+      width={size}
+      height={(size / W) * H}
+      viewBox={`0 0 ${W} ${H}`}
+      fill="none"
+      stroke={color}
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ display: "block", overflow: "visible" }}
+    >
+      {GLYPHS[kind]}
+    </svg>
+  );
+}

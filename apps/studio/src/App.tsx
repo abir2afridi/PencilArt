@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Draw, type DrawHandle, type Stroke } from "pencilart";
+import { Draw, isShape, type DrawHandle, type ShapeKind, type Stroke } from "pencilart";
 import { Debug, type DebugState, defaults } from "./Debug";
 import { Sidebar } from "./components/Sidebar";
 import css from "./App.module.css";
@@ -21,6 +21,8 @@ export default function App() {
       stroke change so the header buttons can be disabled honestly. */
   const [hist, setHist] = useState({ canUndo: false, canRedo: false });
   const draw = useRef<DrawHandle>(null);
+  /** The shape in hand, mirrored from the surface so the header can show it. */
+  const [shape, setShape] = useState<ShapeKind | null>(null);
 
   /** A brand-new blank page, made current. */
   const addPage = () => {
@@ -78,6 +80,8 @@ export default function App() {
         <Debug
           shell={shell}
           onShell={setShell}
+          shape={shape}
+          onShape={(id) => draw.current?.selectTool(id)}
           page={page}
           pageCount={pages.length}
           onNewPage={addPage}
@@ -115,9 +119,13 @@ export default function App() {
         motion={debug.motion}
         depth={debug.depth}
         ink={debug.ink}
+        onToolChange={(t) => setShape(isShape(t.active) ? t.active : null)}
         tooltips={debug.tooltips === false ? false : { scope: debug.tooltips }}
         eraser={debug.eraser}
         tools={debug.tools.length ? debug.tools : undefined}
+        /* The shapes live in the header's ShapeTools; an empty tray row
+           keeps the two places from offering the same thing. */
+        shapes={[]}
         controls={debug.controls}
         settings={debug.settings}
         align={debug.align}

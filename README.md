@@ -13,6 +13,7 @@ This is a pnpm monorepo with two halves:
 ## Features
 
 - Seven tools: **Pencil, Pen, Fineliner, Marker, Highlighter, Brush, Fountain Pen** — plus an eraser
+- Four shape tools: **Rectangle, Ellipse, Line, Arrow** — drag to place, Shift to square or snap
 - Size, opacity, and ink colour — shared across tools or remembered per tool
 - Freehand rendering engine that outputs real SVG strokes
 - Export a page as **SVG** or **PNG** (retina scale included)
@@ -20,6 +21,7 @@ This is a pnpm monorepo with two halves:
 - Placement on any edge (`bottom`, `left`, `right`) with alignment and inset control
 - Classic or studio look, four depth levels, light/dark/auto themes
 - Draggable toolbar, hover tooltips, size gauge on the pen barrel
+- A `selectTool` handle and `onToolChange` callback, so a host's own chrome can pick up tools
 - Zero dependencies — peer-depends only on React
 
 ## Getting started
@@ -42,7 +44,8 @@ The demo harness is a drawing notebook in its own right:
   out to a full column while the pointer is over it or an open menu; on
   small screens the rail steps aside for a drawer. The header above keeps
   the brand, the shell theme and the pages, so the whole surface stays a
-  drawing
+  drawing; the four shape tools rest there as buttons too, keeping the
+  drawing tray purely about pens
 - **Pages** — add pages with **+**, turn them with **◀ ▶**, delete with the
   bin, and watch them flip like paper in a real book (3D page-turn on the
   spine edge)
@@ -91,6 +94,9 @@ await draw.current?.download("drawing", "png", 2);
 
 For hosts that bring their own chrome, the pieces are exported separately:
 `DrawSurface`, `Toolbar`, `useDrawing`, and the freehand `getStroke` engine.
+`Draw` accepts `tools` (the pens and shapes in the tray, in order) and
+`shapes` — an empty `shapes={[]}` hides the shape row entirely, for hosts
+that place the shape tools in their own chrome (as the studio does).
 
 ## License
 

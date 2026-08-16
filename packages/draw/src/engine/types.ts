@@ -12,8 +12,12 @@ export type PenId =
   | "brush"
   | "fountain";
 
+/** A geometric figure the surface can draw, like a pen but dragged, not
+ * traced. */
+export type ShapeKind = "rect" | "ellipse" | "line" | "arrow";
+
 /** Anything the toolbar can be holding. */
-export type ToolId = PenId | "eraser";
+export type ToolId = PenId | "eraser" | ShapeKind;
 
 /**
  * A broad-nib pen: a flat edge held at a fixed angle. Width comes from the
@@ -50,6 +54,26 @@ export type StrokeShape = {
   simulatePressure?: boolean;
 };
 
+/** One shape tool as offered in the tray. */
+export type ShapeDef = {
+  kind: ShapeKind;
+  name: string;
+  /** single-key keyboard shortcut */
+  key: string;
+  defaultSize: number;
+  /** default stroke opacity (0–1) */
+  defaultOpacity: number;
+};
+
+/** A committed figure: the bounding box of its two drag anchors. */
+export type Shape = {
+  kind: ShapeKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
 /** One committed mark. */
 export type Stroke = {
   id: number;
@@ -59,6 +83,12 @@ export type Stroke = {
   opacity: number;
   points: Point[];
   shape?: StrokeShape;
+  /**
+   * A geometric figure in place of a freehand outline. When present the
+   * stroke renders as `figure`, stroked at `size` in `color`, and `points`
+   * are just its two anchors.
+   */
+  figure?: Shape;
   /**
    * An eraser pass. Kept in the same list, in order, because erasing must only
    * affect ink already on the page — draw again afterwards and the new mark is
