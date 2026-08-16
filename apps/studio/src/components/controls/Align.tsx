@@ -1,5 +1,6 @@
 import { ALIGNS, type DebugState } from "../../state";
 import { Dropdown, Toggle } from "../Dropdown";
+import { CtrlIcon } from "../icons";
 
 /** Where along its edge the toolbar sits. */
 export function AlignControl({
@@ -10,7 +11,11 @@ export function AlignControl({
   onChange: (next: DebugState) => void;
 }) {
   return (
-    <Dropdown label="Align" current={value.align}>
+    <Dropdown
+      label="Align"
+      current={value.align}
+      icon={<CtrlIcon id="align" />}
+    >
       {(close) =>
         ALIGNS.map((v) => (
           <Toggle

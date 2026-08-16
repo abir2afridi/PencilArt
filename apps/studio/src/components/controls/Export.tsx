@@ -1,6 +1,7 @@
 import type { RefObject } from "react";
 import type { DrawHandle } from "pencilart";
 import { Chip, Dropdown } from "../Dropdown";
+import { CtrlIcon } from "../icons";
 
 /** Saving the current page: SVG and PNG downloads, or the SVG to clipboard. */
 export function ExportControl({
@@ -9,7 +10,7 @@ export function ExportControl({
   draw: RefObject<DrawHandle | null>;
 }) {
   return (
-    <Dropdown label="Export">
+    <Dropdown label="Export" icon={<CtrlIcon id="export" />}>
       {() => (
         <>
           <Chip onClick={() => draw.current?.download("drawing", "svg")}>

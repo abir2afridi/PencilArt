@@ -19,10 +19,13 @@ import css from "./Dropdown.module.css";
 export function Dropdown({
   label,
   current,
+  icon,
   children,
 }: {
   label: string;
   current?: string;
+  /** A small glyph for the trigger, shown when the sidebar is collapsed. */
+  icon?: ReactNode;
   children: (close: () => void) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -53,9 +56,11 @@ export function Dropdown({
         className={css.trigger}
         data-active={open || undefined}
         aria-expanded={open}
+        aria-label={label}
         onClick={() => setOpen((o) => !o)}
       >
-        {label}
+        {icon ? <span className={css.icon}>{icon}</span> : null}
+        <span className={css.label}>{label}</span>
         {current ? <span className={css.current}>{current}</span> : null}
         <ChevronIcon className={css.chevron} />
       </button>

@@ -1,5 +1,6 @@
 import { PLACEMENTS, type DebugState } from "../../state";
 import { Dropdown, Toggle } from "../Dropdown";
+import { CtrlIcon } from "../icons";
 
 /** Which edge the toolbar sits on. */
 export function PlacementControl({
@@ -10,7 +11,11 @@ export function PlacementControl({
   onChange: (next: DebugState) => void;
 }) {
   return (
-    <Dropdown label="Placement" current={value.placement}>
+    <Dropdown
+      label="Placement"
+      current={value.placement}
+      icon={<CtrlIcon id="placement" />}
+    >
       {(close) =>
         PLACEMENTS.map((p) => (
           <Toggle

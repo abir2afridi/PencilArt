@@ -1,5 +1,6 @@
 import { CONTROLS, type DebugState } from "../../state";
 import { Dropdown, Toggle } from "../Dropdown";
+import { CtrlIcon } from "../icons";
 
 /** Which of the built-in toolbar controls are offered. */
 export function ControlsControl({
@@ -10,7 +11,7 @@ export function ControlsControl({
   onChange: (next: DebugState) => void;
 }) {
   return (
-    <Dropdown label="Controls">
+    <Dropdown label="Controls" icon={<CtrlIcon id="controls" />}>
       {() =>
         CONTROLS.map((c) => (
           <Toggle

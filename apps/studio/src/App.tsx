@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Draw, type DrawHandle, type Stroke } from "pencilart";
 import { Debug, type DebugState, defaults } from "./Debug";
+import { Sidebar } from "./components/Sidebar";
 import css from "./App.module.css";
 
 /** Demo harness. The <Draw /> line is all a consumer writes. */
@@ -75,12 +76,9 @@ export default function App() {
     <div className={css.page}>
       <header className={css.header} data-shell={shell}>
         <Debug
-          value={debug}
-          onChange={setDebug}
-          draw={draw}
           shell={shell}
           onShell={setShell}
-page={page}
+          page={page}
           pageCount={pages.length}
           onNewPage={addPage}
           onGoPage={goPage}
@@ -91,9 +89,10 @@ page={page}
           onRedo={() => draw.current?.redo()}
         />
       </header>
-      {/* The book: the page you turned to rests beneath, and the page you
-          left flips over it like paper, pivoting on its spine edge. */}
-      <div className={css.book}>
+      {/* The controls down the left edge, and the book taking the rest. */}
+      <div className={css.body}>
+        <Sidebar value={debug} onChange={setDebug} draw={draw} shell={shell} />
+        <div className={css.book}>
         <div key={`page-${page}`} className={css.stage}>
           <Draw
             ref={draw}
@@ -143,6 +142,7 @@ page={page}
             />
           </div>
         )}
+        </div>
       </div>
     </div>
   );

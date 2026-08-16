@@ -1,5 +1,6 @@
 import { THEMES, type DebugState } from "../../state";
 import { Dropdown, Toggle } from "../Dropdown";
+import { CtrlIcon } from "../icons";
 
 /** The drawing component's own light, dark, or OS-following theme. */
 export function ThemeControl({
@@ -10,7 +11,11 @@ export function ThemeControl({
   onChange: (next: DebugState) => void;
 }) {
   return (
-    <Dropdown label="Theme" current={value.theme}>
+    <Dropdown
+      label="Theme"
+      current={value.theme}
+      icon={<CtrlIcon id="theme" />}
+    >
       {(close) =>
         THEMES.map((t) => (
           <Toggle

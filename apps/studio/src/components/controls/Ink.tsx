@@ -1,5 +1,6 @@
 import { INKS, type DebugState } from "../../state";
 import { Dropdown, Toggle } from "../Dropdown";
+import { CtrlIcon } from "../icons";
 
 /** How ink colour is shared between the tools. */
 export function InkControl({
@@ -10,7 +11,11 @@ export function InkControl({
   onChange: (next: DebugState) => void;
 }) {
   return (
-    <Dropdown label="Ink" current={value.ink}>
+    <Dropdown
+      label="Ink"
+      current={value.ink}
+      icon={<CtrlIcon id="ink" />}
+    >
       {(close) =>
         INKS.map((m) => (
           <Toggle

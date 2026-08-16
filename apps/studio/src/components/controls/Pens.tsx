@@ -1,6 +1,7 @@
 import { PENS } from "pencilart";
 import type { DebugState } from "../../state";
 import { Dropdown, Toggle } from "../Dropdown";
+import { CtrlIcon } from "../icons";
 
 /** Which pens appear, and in what order. */
 export function PensControl({
@@ -11,7 +12,7 @@ export function PensControl({
   onChange: (next: DebugState) => void;
 }) {
   return (
-    <Dropdown label="Pens">
+    <Dropdown label="Pens" icon={<CtrlIcon id="pens" />}>
       {() =>
         PENS.map((p) => {
           // Empty means every tool, so the first click has to seed the list

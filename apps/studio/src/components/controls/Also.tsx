@@ -1,5 +1,6 @@
 import type { DebugState } from "../../state";
 import { Dropdown, Toggle } from "../Dropdown";
+import { CtrlIcon } from "../icons";
 
 /** Everything that doesn't fit anywhere else. */
 export function AlsoControl({
@@ -10,7 +11,7 @@ export function AlsoControl({
   onChange: (next: DebugState) => void;
 }) {
   return (
-    <Dropdown label="Also">
+    <Dropdown label="Also" icon={<CtrlIcon id="also" />}>
       {() => (
         <>
           {/* `chrome={false}` is the bring-your-own-UI switch: it takes the

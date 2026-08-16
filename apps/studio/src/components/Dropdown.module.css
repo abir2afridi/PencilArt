@@ -156,3 +156,50 @@
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
 }
+
+/* In the sidebar every control is a full-width row — icon and label on the
+   left, the current value and chevron on the right — and the menu drops
+   beneath it, as wide as the sidebar itself. */
+[data-sidebar] .dropdown {
+  width: 100%;
+}
+
+[data-sidebar] .trigger {
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+}
+
+[data-sidebar] .current {
+  margin-left: auto;
+}
+
+[data-sidebar] .menu {
+  left: 0;
+  right: 0;
+  min-width: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* The small glyph on a trigger, for when the sidebar is a collapsed rail. */
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+[data-sidebar] .label {
+  white-space: nowrap;
+}
+
+/* Collapsed rail: only the glyph stays, centred. */
+[data-sidebar][data-open="false"] .trigger {
+  justify-content: center;
+  padding: 5px 0;
+}
+
+[data-sidebar][data-open="false"] .label,
+[data-sidebar][data-open="false"] .current,
+[data-sidebar][data-open="false"] .chevron {
+  display: none;
+}

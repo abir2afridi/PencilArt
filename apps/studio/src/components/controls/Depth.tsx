@@ -1,5 +1,6 @@
 import { DEPTHS, type DebugState } from "../../state";
 import { Dropdown, Toggle } from "../Dropdown";
+import { CtrlIcon } from "../icons";
 
 /** How much the toolbar reads as a physical object. */
 export function DepthControl({
@@ -10,7 +11,11 @@ export function DepthControl({
   onChange: (next: DebugState) => void;
 }) {
   return (
-    <Dropdown label="Depth" current={value.depth}>
+    <Dropdown
+      label="Depth"
+      current={value.depth}
+      icon={<CtrlIcon id="depth" />}
+    >
       {(close) =>
         DEPTHS.map((d) => (
           <Toggle

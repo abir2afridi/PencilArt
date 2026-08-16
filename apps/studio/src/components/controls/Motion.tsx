@@ -1,5 +1,6 @@
 import type { DebugState } from "../../state";
 import { Dropdown, Toggle } from "../Dropdown";
+import { CtrlIcon } from "../icons";
 
 /** How the bar arrives and leaves, and a replay of the whole trip. */
 export function MotionControl({
@@ -10,7 +11,11 @@ export function MotionControl({
   onChange: (next: DebugState) => void;
 }) {
   return (
-    <Dropdown label="Motion" current={value.motion}>
+    <Dropdown
+      label="Motion"
+      current={value.motion}
+      icon={<CtrlIcon id="motion" />}
+    >
       {(close) => (
         <>
           {(["rise", "none"] as const).map((m) => (

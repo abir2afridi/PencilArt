@@ -1,5 +1,6 @@
 import { LOOKS, type DebugState } from "../../state";
 import { Dropdown, Toggle } from "../Dropdown";
+import { CtrlIcon } from "../icons";
 
 /** How the tools are drawn, plus the gauge and keyboard shortcuts. */
 export function ToolsControl({
@@ -10,7 +11,11 @@ export function ToolsControl({
   onChange: (next: DebugState) => void;
 }) {
   return (
-    <Dropdown label="Tools" current={value.look}>
+    <Dropdown
+      label="Tools"
+      current={value.look}
+      icon={<CtrlIcon id="look" />}
+    >
       {(close) => (
         <>
           {LOOKS.map((v) => (

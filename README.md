@@ -35,9 +35,13 @@ pnpm typecheck    # typecheck everything
 
 The demo harness is a drawing notebook in its own right:
 
-- **Header bar** — one dropdown per feature (Placement, Theme, Depth,
-  Settings, Align, Tools, Ink, Controls, Pens, Motion, Also, Export), so the
-  bar stays slim and each knob appears only when its group opens
+- **Controls sidebar** — every knob lives down the left edge, one dropdown per
+  feature (Placement, Theme, Depth, Settings, Align, Tools, Ink, Controls,
+  Pens, Motion, Also, Export), each showing its current value and opening
+  only when asked. It rests as a rail of glyphs and fans out to a full
+  column while the pointer is over it or an open menu. The header above
+  keeps the brand, the shell theme and the pages, so the whole surface
+  stays a drawing
 - **Pages** — add pages with **+**, turn them with **◀ ▶**, delete with the
   bin, and watch them flip like paper in a real book (3D page-turn on the
   spine edge)

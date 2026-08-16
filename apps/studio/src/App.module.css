@@ -36,6 +36,13 @@
   color: rgba(0, 0, 0, 0.6);
 }
 
+/* The header, then a row with the controls sidebar and the book. */
+.body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 /* The book: a flat stage that takes whatever the header leaves over, with
    the perspective for the page turning inside it. */
 .book {

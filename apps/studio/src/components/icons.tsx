@@ -149,3 +149,102 @@ export function AddIcon() {
     </svg>
   );
 }
+
+/** The glyph each sidebar control sits on when the rail is collapsed. */
+export type CtrlIconId =
+  | "placement"
+  | "theme"
+  | "depth"
+  | "settings"
+  | "align"
+  | "look"
+  | "ink"
+  | "controls"
+  | "pens"
+  | "motion"
+  | "also"
+  | "export";
+
+const CTRL_ICON_PATHS: Record<CtrlIconId, React.ReactNode> = {
+  placement: (
+    <>
+      <path d="M5 9l-3 3 3 3" />
+      <path d="M9 5l3-3 3 3" />
+      <path d="M19 9l3 3-3 3" />
+      <path d="M9 19l3 3 3-3" />
+    </>
+  ),
+  theme: (
+    <>
+      <path d="M12 3a9 9 0 1 0 0 18Z" />
+      <path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none" />
+    </>
+  ),
+  depth: (
+    <>
+      <path d="m12 2 10 6-10 6L2 8l10-6Z" />
+      <path d="M2 16l10 6 10-6" />
+    </>
+  ),
+  settings: (
+    <>
+      <path d="M21 4H3" />
+      <path d="M21 12H3" />
+      <path d="M21 20H3" />
+      <circle cx="9" cy="4" r="2" />
+      <circle cx="15" cy="12" r="2" />
+      <circle cx="9" cy="20" r="2" />
+    </>
+  ),
+  align: (
+    <>
+      <path d="M4 6h14" />
+      <path d="M4 12h18" />
+      <path d="M4 18h10" />
+    </>
+  ),
+  look: (
+    <>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  ink: <path d="M12 3s6 6.6 6 11a6 6 0 0 1-12 0c0-4.4 6-11 6-11Z" />,
+  controls: (
+    <>
+      <path d="M8 5h8a7 7 0 0 1 0 14H8A7 7 0 0 1 8 5Z" />
+      <circle cx="8" cy="12" r="2.5" />
+    </>
+  ),
+  pens: <path d="M17 3l4 4L8 20l-5 1 1-5L17 3Z" />,
+  motion: <path d="M7 4l13 8-13 8V4Z" />,
+  also: (
+    <path d="M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2L12 3Z" />
+  ),
+  export: (
+    <>
+      <path d="M12 4v11" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M4 20h16" />
+    </>
+  ),
+};
+
+/** The glyph for one sidebar control, drawn in the current ink. */
+export function CtrlIcon({ id }: { id: CtrlIconId }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {CTRL_ICON_PATHS[id]}
+    </svg>
+  );
+}
