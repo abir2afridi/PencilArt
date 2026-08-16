@@ -1,0 +1,27 @@
+/* The theme toggle, a chip with just the sun or the moon in it. */
+.theme {
+  display: grid;
+  place-items: center;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.theme:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+[data-shell="light"] .theme {
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.6);
+}
+
+[data-shell="light"] .theme:hover {
+  background: rgba(0, 0, 0, 0.11);
+}

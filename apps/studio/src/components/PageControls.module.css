@@ -1,0 +1,15 @@
+/* History and page navigation, in one row. */
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* The chevron as left/right arrows. */
+.left {
+  transform: rotate(90deg);
+}
+
+.right {
+  transform: rotate(-90deg);
+}
