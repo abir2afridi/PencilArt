@@ -359,6 +359,7 @@ export function DrawSurface({
     if (ids.length) {
       const h = handleAt(x, y, ids);
       if (h !== null) {
+        pointsRef.current = [[x, y, 1]];
         if (h === 8) {
           const u = selUnion(ids);
           const center = [u.x + u.w / 2, u.y + u.h / 2] as [number, number];

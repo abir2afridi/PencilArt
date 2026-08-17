@@ -1,0 +1,7 @@
+CHROME rects (incl. selection box): 1
+HANDLE rects: 8
+ROTATE handle: 1
+BEFORE: M250 250h150v70h-150Z
+SE HANDLE bbox: { x: 472.75, y: 379.75, w: 12.5, h: 12.5 }
+AFTER: M251.9 252.9h196.3v104.1h-196.3Z
+RESIZE WORKED

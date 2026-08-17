@@ -1,0 +1,38 @@
+
+> pencilart@0.1.1 build D:\GitHub Project\PencilArt\packages\draw
+> node build.mjs
+
+node:internal/child_process:1144
+    result.error = new ErrnoException(result.error, 'spawnSync ' + options.file);
+                   ^
+
+<ref *1> Error: spawnSync npx ENOENT
+    at Object.spawnSync (node:internal/child_process:1144:20)
+    at spawnSync (node:child_process:928:24)
+    at execFileSync (node:child_process:971:15)
+    at file:///D:/GitHub%20Project/PencilArt/packages/draw/build.mjs:82:1
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'spawnSync npx',
+  path: 'npx',
+  spawnargs: [
+    'tsc',
+    '--emitDeclarationOnly',
+    '--declaration',
+    '--noEmit',
+    'false',
+    '--outDir',
+    'dist'
+  ],
+  error: [Circular *1],
+  status: null,
+  signal: null,
+  output: null,
+  pid: 0,
+  stdout: undefined,
+  stderr: undefined
+}
+
+Node.js v26.7.0
+ΓÇëELIFECYCLEΓÇë Command failed with exit code 1.
