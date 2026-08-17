@@ -563,30 +563,47 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
       getSelection: () => [...selection],
       setSelection,
       getView: () => ({ ...view }),
+      // A host button and the surface's own gestures are two doors onto the
+      // same view; both report through the same channel.
       zoomBy: (factor) => {
         const v = view;
         const k = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v.k * factor));
         if (k === v.k) return;
         const cx = v.x + surfaceBoard.w / v.k / 2;
         const cy = v.y + surfaceBoard.h / v.k / 2;
-        setView({ x: cx - surfaceBoard.w / k / 2, y: cy - surfaceBoard.h / k / 2, k });
+        const next = {
+          x: cx - surfaceBoard.w / k / 2,
+          y: cy - surfaceBoard.h / k / 2,
+          k,
+        };
+        setView(next);
+        reportedView.current?.(next);
       },
-      zoomReset: () => setView({ x: 0, y: 0, k: 1 }),
+      zoomReset: () => {
+        setView({ x: 0, y: 0, k: 1 });
+        reportedView.current?.({ x: 0, y: 0, k: 1 });
+      },
       zoomFit: () => {
         const b = unionBounds(drawing.strokes);
         const pad = 60;
         const w = b.w + pad * 2;
         const h = b.h + pad * 2;
-        if (!(w > 0 && h > 0)) return setView({ x: 0, y: 0, k: 1 });
+        if (!(w > 0 && h > 0)) {
+          setView({ x: 0, y: 0, k: 1 });
+          reportedView.current?.({ x: 0, y: 0, k: 1 });
+          return;
+        }
         const k = Math.min(
           ZOOM_MAX,
           Math.max(ZOOM_MIN, Math.min(surfaceBoard.w / w, surfaceBoard.h / h)),
         );
-        setView({
+        const next = {
           x: b.x - pad + (surfaceBoard.w / k - w) / 2,
           y: b.y - pad + (surfaceBoard.h / k - h) / 2,
           k,
-        });
+        };
+        setView(next);
+        reportedView.current?.(next);
       },
       styleSelection,
       alignSelection,

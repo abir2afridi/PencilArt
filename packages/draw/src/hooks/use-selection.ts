@@ -40,7 +40,7 @@ export function useSelection(drawing: DrawingController) {
       const ids = new Set(selection);
       if (!ids.size) return;
       const next = drawing.strokes.map((s) => {
-        if (!ids.has(s.id)) return s;
+        if (!ids.has(s.id) || s.locked) return s;
         const out: Stroke = { ...s };
         if (patch.color !== undefined) out.color = patch.color;
         if (patch.size !== undefined) out.size = patch.size;
@@ -74,8 +74,11 @@ export function useSelection(drawing: DrawingController) {
   const deleteSelection = useCallback(() => {
     const ids = new Set(selection);
     if (!ids.size) return;
-    drawing.commit(drawing.strokes.filter((s) => !ids.has(s.id)));
-    setSelection([]);
+    const next = drawing.strokes.filter((s) => !ids.has(s.id) || s.locked);
+    drawing.commit(next);
+    // A delete that deleted nothing (a locked selection) keeps the hand
+    // intact, so you can still go and unlock the things.
+    if (next.length !== drawing.strokes.length) setSelection([]);
   }, [drawing, selection]);
 
   /** Copy the selection, ten over from itself, and take the copies. */
@@ -84,7 +87,7 @@ export function useSelection(drawing: DrawingController) {
     if (!ids.size) return;
     const groupMap = new Map<number, number>();
     const copies = drawing.strokes
-      .filter((s) => ids.has(s.id))
+      .filter((s) => ids.has(s.id) && !s.locked)
       .map((s) => {
         let group = s.group;
         if (group !== undefined) {
@@ -103,7 +106,9 @@ export function useSelection(drawing: DrawingController) {
     const ids = new Set(selection);
     const gid = nextId();
     drawing.commit(
-      drawing.strokes.map((s) => (ids.has(s.id) ? { ...s, group: gid } : s)),
+      drawing.strokes.map((s) =>
+        ids.has(s.id) && !s.locked ? { ...s, group: gid } : s,
+      ),
     );
   }, [drawing, selection]);
 
@@ -112,13 +117,13 @@ export function useSelection(drawing: DrawingController) {
     const ids = new Set(selection);
     drawing.commit(
       drawing.strokes.map((s) =>
-        ids.has(s.id) ? { ...s, group: undefined } : s,
+        ids.has(s.id) && !s.locked ? { ...s, group: undefined } : s,
       ),
     );
   }, [drawing, selection]);
 
   /** Freeze the selection in place, or set it loose again. Locked elements
-      can't be picked up, so they leave the hand either way. */
+      can be picked up again only so they can be told to stay loose. */
   const toggleLockSelection = useCallback(() => {
     const ids = new Set(selection);
     if (!ids.size) return;
@@ -144,7 +149,7 @@ export function useSelection(drawing: DrawingController) {
       drawing.begin();
       drawing.update(
         drawing.strokes.map((s) =>
-          ids.has(s.id) ? translateStroke(s, dx, dy) : s,
+          ids.has(s.id) && !s.locked ? translateStroke(s, dx, dy) : s,
         ),
       );
       drawing.end();
@@ -159,7 +164,7 @@ export function useSelection(drawing: DrawingController) {
       if (sel.length < 2) return;
       const u = unionBounds(sel);
       const next = drawing.strokes.map((s) => {
-        if (!selection.includes(s.id)) return s;
+        if (!selection.includes(s.id) || s.locked) return s;
         const b = boundsOf(s);
         let dx = 0;
         let dy = 0;
@@ -194,7 +199,7 @@ export function useSelection(drawing: DrawingController) {
       const gap = (extent - total) / (ranked.length - 1);
       let cursor = axis === "h" ? first.x : first.y;
       const next = drawing.strokes.map((s) => {
-        if (!selection.includes(s.id)) return s;
+        if (!selection.includes(s.id) || s.locked) return s;
         const r = ranked.find((r) => r.s.id === s.id);
         if (!r) return s;
         const b = r.b;
@@ -215,11 +220,17 @@ export function useSelection(drawing: DrawingController) {
       if (!ids.size) return;
       const all = drawing.strokes;
       if (how === "front") {
-        drawing.commit([...all.filter((s) => !ids.has(s.id)), ...all.filter((s) => ids.has(s.id))]);
+        drawing.commit([
+          ...all.filter((s) => !ids.has(s.id) || s.locked),
+          ...all.filter((s) => ids.has(s.id) && !s.locked),
+        ]);
         return;
       }
       if (how === "back") {
-        drawing.commit([...all.filter((s) => ids.has(s.id)), ...all.filter((s) => !ids.has(s.id))]);
+        drawing.commit([
+          ...all.filter((s) => ids.has(s.id) && !s.locked),
+          ...all.filter((s) => !ids.has(s.id) || s.locked),
+        ]);
         return;
       }
       // One step through the neighbours: swap the selection with the adjacent
@@ -228,11 +239,11 @@ export function useSelection(drawing: DrawingController) {
       for (let i = 0; i < all.length; i++) {
         const s = all[i];
         if (how === "forward") {
-          if (ids.has(s.id) && i + 1 < all.length && !ids.has(all[i + 1].id)) {
+          if (ids.has(s.id) && !s.locked && i + 1 < all.length && !ids.has(all[i + 1].id)) {
             out.push(all[i + 1], s);
             i++;
           } else out.push(s);
-        } else if (ids.has(s.id) && i > 0 && !ids.has(all[i - 1].id)) {
+        } else if (ids.has(s.id) && !s.locked && i > 0 && !ids.has(all[i - 1].id)) {
           out.pop();
           out.push(s, all[i - 1]);
         } else out.push(s);

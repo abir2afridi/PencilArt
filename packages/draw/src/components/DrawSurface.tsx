@@ -326,10 +326,28 @@ export function DrawSurface({
     [drawing.strokes],
   );
 
-  /** Transform every selected element by the same rule. */
+  /** Transform every selected element by the same rule. Locked elements are
+      in the hand but stay put — only the lock toggle can move them. */
   const mapSelected = useCallback(
     (ids: number[], fn: (s: Stroke) => Stroke): Stroke[] =>
-      drawing.strokes.map((s) => (ids.includes(s.id) ? fn(s) : s)),
+      drawing.strokes.map((s) =>
+        ids.includes(s.id) && !s.locked ? fn(s) : s,
+      ),
+    [drawing.strokes],
+  );
+
+  /** The strokes as they were when a move/resize/rotate began. Every pointer
+      move re-derives positions from these, so a gesture is one smooth sweep
+      instead of a pile-up of little translations. */
+  const orig = useRef<Map<number, Stroke> | null>(null);
+  const snapshot = useCallback(
+    (ids: number[]) => {
+      orig.current = new Map(
+        drawing.strokes
+          .filter((s) => ids.includes(s.id))
+          .map((s) => [s.id, s]),
+      );
+    },
     [drawing.strokes],
   );
 
@@ -348,6 +366,7 @@ export function DrawSurface({
         } else {
           gesture.current = { mode: "resize", ids, handle: h, union: selUnion(ids) };
         }
+        snapshot(ids);
         drawing.begin();
         return;
       }
@@ -356,7 +375,7 @@ export function DrawSurface({
     // Topmost element first — the last one in the array.
     for (let i = drawing.strokes.length - 1; i >= 0; i--) {
       const s = drawing.strokes[i];
-      if (s.erase || s.locked) continue;
+      if (s.erase) continue;
       if (!hitTest(s, x, y)) continue;
       const picked = ids.includes(s.id) ? ids : expandGroup(s.id);
       if (!ids.includes(s.id)) {
@@ -364,6 +383,8 @@ export function DrawSurface({
         state.current.selection = picked;
       }
       gesture.current = { mode: "move", ids: picked };
+      pointsRef.current = [[x, y, 1]];
+      snapshot(picked);
       drawing.begin();
       return;
     }
@@ -371,6 +392,7 @@ export function DrawSurface({
     // Empty ground: a marquee. The selection clears on release if it never
     // moved; this way one stray pixel doesn't wipe a careful selection.
     gesture.current = { mode: "marquee" };
+    pointsRef.current = [[x, y, 1]];
     setMarquee({ x, y, w: 0, h: 0 });
     void e;
   };
@@ -446,7 +468,9 @@ export function DrawSurface({
       const dx = x - start[0];
       const dy = y - start[1];
       drawing.update(
-        mapSelected(g.ids, (s) => translateStroke(s, dx, dy)),
+        mapSelected(g.ids, (s) =>
+          translateStroke(orig.current?.get(s.id) ?? s, dx, dy),
+        ),
       );
       return;
     }
@@ -482,39 +506,40 @@ export function DrawSurface({
       });
       drawing.update(
         mapSelected(g.ids, (s) => {
-          if (s.figure) {
-            const f = s.figure;
+          const o = orig.current?.get(s.id) ?? s;
+          if (o.figure) {
+            const f = o.figure;
             const bx = fx(f);
             const by = fy(f);
-            return { ...s, figure: { ...f, ...bx, ...by } };
+            return { ...o, figure: { ...f, ...bx, ...by } };
           }
-          if (s.image || s.text) {
-            const part = (s.image ?? s.text)!;
-            const p0 = s.points[0] ?? [0, 0, 0.5];
+          if (o.image || o.text) {
+            const part = (o.image ?? o.text)!;
+            const p0 = o.points[0] ?? [0, 0, 0.5];
             const bx = fx({ x: p0[0], w: part.w });
             const by = fy({ y: p0[1], h: part.h });
             return {
-              ...s,
+              ...o,
               points: [[bx.x, by.y, p0[2]]],
-              image: s.image ? { ...s.image, w: bx.w, h: by.h } : undefined,
-              text: s.text
+              image: o.image ? { ...o.image, w: bx.w, h: by.h } : undefined,
+              text: o.text
                 ? {
-                    ...s.text,
+                    ...o.text,
                     w: bx.w,
                     h: by.h,
-                    size: Math.max(6, s.text.size * (by.h / part.h)),
+                    size: Math.max(6, o.text.size * (by.h / part.h)),
                   }
                 : undefined,
             };
           }
-          const b = boundsOf(s);
+          const b = boundsOf(o);
           const bx = fx(b);
           const by = fy(b);
           const sx = b.w ? bx.w / b.w : 1;
           const sy = b.h ? by.h / b.h : 1;
           return {
-            ...s,
-            points: s.points.map(([px, py, pr]) => [
+            ...o,
+            points: o.points.map(([px, py, pr]) => [
               bx.x + (px - b.x) * sx,
               by.y + (py - b.y) * sy,
               pr,
@@ -533,10 +558,13 @@ export function DrawSurface({
       if (e.shiftKey) a = Math.round(a / (Math.PI / 12)) * (Math.PI / 12);
       const deg = (a * 180) / Math.PI;
       drawing.update(
-        mapSelected(g.ids, (s) => ({
-          ...s,
-          rotate: Math.round((((s.rotate ?? 0) + deg) % 360) * 100) / 100,
-        })),
+        mapSelected(g.ids, (s) => {
+          const o = orig.current?.get(s.id) ?? s;
+          return {
+            ...o,
+            rotate: Math.round((((o.rotate ?? 0) + deg) % 360) * 100) / 100,
+          };
+        }),
       );
       return;
     }
@@ -858,16 +886,6 @@ export function DrawSurface({
     } else {
       drawing.update(drawing.strokes.filter((s) => s.id !== draft.id));
     }
-    drawing.end();
-    originalText.current = null;
-  };
-
-  const cancelText = () => {
-    const draft = editingRef.current;
-    if (!draft) return;
-    setEditing(null);
-    if (draft.id === null) return; // a draft never touched the strokes
-    drawing.update(drawing.strokes); // no-op keeps history clean
     drawing.end();
     originalText.current = null;
   };
@@ -1348,7 +1366,7 @@ export function DrawSurface({
                       commitText();
                     } else if (e.key === "Escape") {
                       e.preventDefault();
-                      cancelText();
+                      commitText();
                     }
                   }}
                 />
