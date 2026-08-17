@@ -14,10 +14,16 @@ export type PenId =
 
 /** A geometric figure the surface can draw, like a pen but dragged, not
  * traced. */
-export type ShapeKind = "rect" | "ellipse" | "line" | "arrow";
+export type ShapeKind =
+  | "rect"
+  | "ellipse"
+  | "diamond"
+  | "line"
+  | "arrow"
+  | "double-arrow";
 
 /** Anything the toolbar can be holding. */
-export type ToolId = PenId | "eraser" | ShapeKind;
+export type ToolId = PenId | "eraser" | "select" | "text" | ShapeKind;
 
 /**
  * A broad-nib pen: a flat edge held at a fixed angle. Width comes from the
@@ -75,6 +81,9 @@ export type ShapeDef = {
   snap: (w: number, h: number) => { w: number; h: number };
 };
 
+/** How a closed figure is filled. */
+export type FigureFill = "solid" | "hachure" | "cross-hatch";
+
 /** A committed figure: the bounding box of its two drag anchors. */
 export type Shape = {
   kind: ShapeKind;
@@ -82,6 +91,28 @@ export type Shape = {
   y: number;
   w: number;
   h: number;
+  /** Paint the closed path. `true` is the plain wash; the others are hatched. */
+  fill?: FigureFill;
+  /** The shaft's line style; the arrow's head stays solid. */
+  dash?: FigureDash;
+};
+
+/** The shaft's line style. */
+export type FigureDash = "solid" | "dash" | "dot";
+
+/** A raster placed on the board at `points[0]`, sized `w`×`h`. */
+export type ImagePart = { data: string; w: number; h: number };
+
+/** A text mark placed at `points[0]`, fitted to `w`×`h`. */
+export type TextPart = {
+  content: string;
+  size: number;
+  w: number;
+  h: number;
+  /** CSS font family, for hosts that want to override the default hand. */
+  font: string;
+  bold?: boolean;
+  italic?: boolean;
 };
 
 /** One committed mark. */
@@ -99,6 +130,16 @@ export type Stroke = {
    * are just its two anchors.
    */
   figure?: Shape;
+  /** A raster in place of an outline; `points` is its top-left corner. */
+  image?: ImagePart;
+  /** A text mark; `points` is its top-left corner and `text` sizes it. */
+  text?: TextPart;
+  /** Rotation in degrees, clockwise, about the element's own centre. */
+  rotate?: number;
+  /** Members of the same group select as one. */
+  group?: number;
+  /** Frozen in place: it can't be picked up, moved, or changed. */
+  locked?: boolean;
   /**
    * An eraser pass. Kept in the same list, in order, because erasing must only
    * affect ink already on the page — draw again afterwards and the new mark is
@@ -109,3 +150,6 @@ export type Stroke = {
 
 /** The fixed-size surface strokes are drawn onto. */
 export type Board = { w: number; h: number };
+
+/** An axis-aligned box on the board, in board units. */
+export type Box = { x: number; y: number; w: number; h: number };

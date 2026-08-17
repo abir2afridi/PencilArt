@@ -679,11 +679,19 @@ const GLYPHS: Record<ShapeKind, React.ReactElement> = {
   ellipse: (
     <path d="M15 19a11 13 0 1 0 0 28a11 13 0 1 0 0-28Z" />
   ),
+  diamond: <path d="M15 19 25 35 15 51 5 35Z" />,
   line: <path d="M8 52L22 26" />,
   arrow: (
     <>
       <path d="M7 51L20 38" />
       <path d="M15 38h5v5" />
+    </>
+  ),
+  "double-arrow": (
+    <>
+      <path d="M7 51L20 38" />
+      <path d="M15 38h5v5" />
+      <path d="M12 51h-5v-5" />
     </>
   ),
 };
@@ -716,6 +724,42 @@ export function ShapeIcon({
       style={{ display: "block", overflow: "visible" }}
     >
       {GLYPHS[kind]}
+    </svg>
+  );
+}
+
+/**
+ * The selection tools' tray glyphs: an arrow for selecting, a letter for
+ * text. They are the one part of the tray that isn't an implement, so they
+ * read as tools rather than as marks.
+ */
+export function ToolGlyph({
+  id,
+  color,
+  size = 30,
+}: {
+  id: "select" | "text";
+  color: string;
+  size?: number;
+}) {
+  return (
+    <svg
+      width={size}
+      height={(size / W) * H}
+      viewBox={`0 0 ${W} ${H}`}
+      fill="none"
+      stroke={color}
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ display: "block", overflow: "visible" }}
+    >
+      {id === "select" ? (
+        <path d="M9 9v14l4.6-4.2 3.3 7.7 2.6-1.1-3.3-7.7 6 2.1Z" fill={color} />
+      ) : (
+        <path d="M9 13h12v3.4h-4.3v20h-3.4v-20H9Z" fill={color} />
+      )}
     </svg>
   );
 }

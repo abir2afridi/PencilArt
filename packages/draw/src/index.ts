@@ -13,6 +13,15 @@ export {
   strokePath,
 } from "./engine/geometry";
 export { toPng, toSvg } from "./engine/serialize";
+export {
+  DRAWING_APP,
+  DRAWING_VERSION,
+  isStrokeLike,
+  parseDrawing,
+  serializeDrawing,
+  remapStrokes,
+} from "./engine/import";
+export type { DrawingFile } from "./engine/import";
 // The ceilings, so a host can check its own palette against it.
 export {
   MAX_SWATCHES,
@@ -36,6 +45,7 @@ export type {
 // Hooks
 export { useDrawing } from "./hooks/use-drawing";
 export type { DrawingController } from "./hooks/use-drawing";
+export type { AlignHow, ReorderHow, StylePatch } from "./hooks/use-selection";
 
 // Components
 export { Draw } from "./components/Draw";
@@ -55,4 +65,4 @@ export { Toolbar } from "./components/Toolbar";
 export { ShapeIcon, ToolIcon } from "./components/ToolIcon";
 export type { ToolIconId } from "./components/ToolIcon";
 export type { ToolState } from "./components/Toolbar";
-export type { DrawSurfaceProps, Tool } from "./components/DrawSurface";
+export type { DrawSurfaceProps, Tool, View } from "./components/DrawSurface";

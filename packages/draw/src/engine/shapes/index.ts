@@ -1,11 +1,13 @@
 import type { ShapeDef, ShapeKind } from "../types";
 import { rect } from "./rect";
 import { ellipse } from "./ellipse";
+import { diamond } from "./diamond";
 import { line } from "./line";
 import { arrow } from "./arrow";
+import { doubleArrow } from "./double-arrow";
 
 /** The shape tools, in the order they sit in the tray. */
-export const SHAPES: ShapeDef[] = [rect, ellipse, line, arrow];
+export const SHAPES: ShapeDef[] = [rect, ellipse, diamond, line, arrow, doubleArrow];
 
 export const SHAPE_BY_ID = Object.fromEntries(
   SHAPES.map((s) => [s.kind, s]),

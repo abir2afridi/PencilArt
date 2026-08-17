@@ -1,7 +1,17 @@
 import { getStroke } from "./freehand";
 import { PEN_BY_ID } from "./pens";
 import { SHAPE_BY_ID } from "./shapes";
-import type { FigureMarkup, PenId, Point, Shape, ShapeKind, StrokeShape } from "./types";
+import type {
+  Box,
+  FigureDash,
+  FigureMarkup,
+  PenId,
+  Point,
+  Shape,
+  ShapeKind,
+  Stroke,
+  StrokeShape,
+} from "./types";
 
 /** Turn a stroke's rings into an SVG path. */
 export function getSvgPathFromStroke(rings: number[][][]): string {
@@ -152,4 +162,187 @@ export function eraseLayers(
   });
   if (ink.length) layers.push({ ink, erasers: [] });
   return layers;
+}
+
+/** The axis-aligned box an element occupies on the board, rotation ignored. */
+export function boundsOf(stroke: Stroke): Box {
+  if (stroke.figure) {
+    const { x, y, w, h } = stroke.figure;
+    return { x, y, w, h };
+  }
+  if (stroke.image) {
+    const [x, y] = stroke.points[0] ?? [0, 0];
+    return { x, y, w: stroke.image.w, h: stroke.image.h };
+  }
+  if (stroke.text) {
+    const [x, y] = stroke.points[0] ?? [0, 0];
+    return { x, y, w: stroke.text.w, h: stroke.text.h };
+  }
+  if (stroke.points.length === 1) {
+    const [x, y] = stroke.points[0];
+    const r = dotRadius(stroke.size);
+    return { x: x - r, y: y - r, w: r * 2, h: r * 2 };
+  }
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  for (const [x, y] of stroke.points) {
+    if (x < x1) x1 = x;
+    if (y < y1) y1 = y;
+    if (x > x2) x2 = x;
+    if (y > y2) y2 = y;
+  }
+  if (!Number.isFinite(x1)) return { x: 0, y: 0, w: 0, h: 0 };
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+}
+
+/** Move an element by dx,dy, whatever it is made of. */
+export function translateStroke(stroke: Stroke, dx: number, dy: number): Stroke {
+  if (stroke.figure) {
+    return {
+      ...stroke,
+      figure: { ...stroke.figure, x: stroke.figure.x + dx, y: stroke.figure.y + dy },
+    };
+  }
+  if (stroke.image || stroke.text) {
+    const p0 = stroke.points[0] ?? [0, 0, 0.5];
+    return { ...stroke, points: [[p0[0] + dx, p0[1] + dy, p0[2]]] };
+  }
+  return { ...stroke, points: stroke.points.map((p) => [p[0] + dx, p[1] + dy, p[2]]) };
+}
+
+/** The box that covers every element. */
+export function unionBounds(strokes: Stroke[]): Box {
+  let box: Box | null = null;
+  for (const s of strokes) {
+    const b = boundsOf(s);
+    if (!box) {
+      box = { ...b };
+      continue;
+    }
+    const x2 = Math.max(box.x + box.w, b.x + b.w);
+    const y2 = Math.max(box.y + box.h, b.y + b.h);
+    box.x = Math.min(box.x, b.x);
+    box.y = Math.min(box.y, b.y);
+    box.w = x2 - box.x;
+    box.h = y2 - box.y;
+  }
+  return box ?? { x: 0, y: 0, w: 0, h: 0 };
+}
+
+/** Rotate a point about a centre, by degrees clockwise. */
+export function rotateAbout(
+  x: number,
+  y: number,
+  cx: number,
+  cy: number,
+  deg: number,
+): [number, number] {
+  if (!deg) return [x, y];
+  const a = (deg * Math.PI) / 180;
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  const dx = x - cx;
+  const dy = y - cy;
+  return [cx + dx * cos + dy * sin, cy - dx * sin + dy * cos];
+}
+
+/** The centre of a box. */
+export function centreOf(b: Box): [number, number] {
+  return [b.x + b.w / 2, b.y + b.h / 2];
+}
+
+/** Whether a point sits inside a box, with a little room. */
+export function inBox(x: number, y: number, b: Box, pad = 0): boolean {
+  return (
+    x >= b.x - pad &&
+    y >= b.y - pad &&
+    x <= b.x + b.w + pad &&
+    y <= b.y + b.h + pad
+  );
+}
+
+/** Distance from a point to a segment. */
+function segDistance(
+  x: number,
+  y: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.hypot(x - ax, y - ay);
+  let t = ((x - ax) * dx + (y - ay) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(x - (ax + dx * t), y - (ay + dy * t));
+}
+
+/**
+ * Whether a board point lands on a committed mark, rotation included. `tol`
+ * is the picking room in board units, before the mark's own thickness.
+ */
+export function hitTest(stroke: Stroke, x: number, y: number, tol = 8): boolean {
+  if (stroke.erase) return false;
+
+  // Rotated elements answer the query in their own, unrotated space.
+  if (stroke.rotate) {
+    const b = boundsOf(stroke);
+    const [cx, cy] = centreOf(b);
+    [x, y] = rotateAbout(x, y, cx, cy, -stroke.rotate);
+  }
+
+  const room = tol + stroke.size / 2 + 2;
+
+  if (stroke.figure) {
+    const { kind, x: fx, y: fy, w, h } = stroke.figure;
+    if (kind === "line" || kind === "arrow" || kind === "double-arrow") {
+      return segDistance(x, y, fx, fy, fx + w, fy + h) <= room;
+    }
+    return inBox(x, y, { x: fx, y: fy, w, h }, room);
+  }
+
+  if (stroke.image || stroke.text) {
+    const b = boundsOf(stroke);
+    return inBox(x, y, b, room);
+  }
+
+  if (stroke.points.length === 1) {
+    const [px, py] = stroke.points[0];
+    return Math.hypot(x - px, y - py) <= dotRadius(stroke.size) + tol;
+  }
+
+  for (const [px, py] of stroke.points) {
+    if (Math.hypot(x - px, y - py) <= room) return true;
+  }
+  return false;
+}
+
+/** The marks a marquee box picks up: those whose own box it touches. */
+export function marqueeHits(strokes: Stroke[], box: Box): Stroke[] {
+  return strokes.filter((s) => {
+    if (s.erase || s.locked) return false;
+    const b = boundsOf(s);
+    return (
+      b.x < box.x + box.w &&
+      b.x + b.w > box.x &&
+      b.y < box.y + box.h &&
+      b.y + b.h > box.y
+    );
+  });
+}
+
+/** The dash pattern for a line style, or nothing for solid. */
+export function dashArray(dash?: FigureDash): string | undefined {
+  if (dash === "dash") return "9 7";
+  if (dash === "dot") return "2.5 6";
+  return undefined;
+}
+
+/** Line height for a text mark at a given font size. */
+export function lineHeight(size: number): number {
+  return size * 1.35;
 }

@@ -3,14 +3,20 @@ import type { DrawHandle } from "pencilart";
 import type { DebugState } from "../state";
 import { AlignControl } from "./controls/Align";
 import { AlsoControl } from "./controls/Also";
+import { ArrangeControl } from "./controls/Arrange";
 import { ControlsControl } from "./controls/Controls";
 import { DepthControl } from "./controls/Depth";
 import { ExportControl } from "./controls/Export";
+import { ImagesControl } from "./controls/Images";
+import { ImportControl } from "./controls/Import";
 import { InkControl } from "./controls/Ink";
+import { LibraryControl } from "./controls/Library";
 import { MotionControl } from "./controls/Motion";
 import { PensControl } from "./controls/Pens";
 import { PlacementControl } from "./controls/Placement";
 import { SettingsControl } from "./controls/Settings";
+import { StyleControl } from "./controls/Style";
+import { TextControl } from "./controls/Text";
 import { ThemeControl } from "./controls/Theme";
 import { ToolsControl } from "./controls/Tools";
 import { MenuIcon, XIcon } from "./icons";
@@ -21,10 +27,13 @@ function Controls({
   value,
   onChange,
   draw,
+  selection,
 }: {
   value: DebugState;
   onChange: (next: DebugState) => void;
   draw: RefObject<DrawHandle | null>;
+  /** The elements in hand, mirrored from the surface. */
+  selection: number[];
 }) {
   return (
     <>
@@ -39,6 +48,12 @@ function Controls({
       <PensControl value={value} onChange={onChange} />
       <MotionControl value={value} onChange={onChange} />
       <AlsoControl value={value} onChange={onChange} />
+      <ArrangeControl draw={draw} selection={selection} />
+      <StyleControl draw={draw} selection={selection} />
+      <TextControl draw={draw} selection={selection} />
+      <ImagesControl draw={draw} />
+      <ImportControl draw={draw} />
+      <LibraryControl draw={draw} selection={selection} />
       <ExportControl draw={draw} />
     </>
   );
@@ -76,11 +91,14 @@ export function Sidebar({
   onChange,
   draw,
   shell,
+  selection,
 }: {
   value: DebugState;
   onChange: (next: DebugState) => void;
   draw: RefObject<DrawHandle | null>;
   shell: "dark" | "light";
+  /** The elements in hand, mirrored from the surface. */
+  selection: number[];
 }) {
   const [open, setOpen] = useState(false);
   const [drawer, setDrawer] = useState(false);
@@ -127,7 +145,12 @@ export function Sidebar({
         onPointerEnter={() => setOpen(true)}
       >
         <Brand open={open} />
-        <Controls value={value} onChange={onChange} draw={draw} />
+        <Controls
+          value={value}
+          onChange={onChange}
+          draw={draw}
+          selection={selection}
+        />
       </aside>
       {/* The thin bar on small screens, and the drawer it opens. */}
       <div className={css.mobilebar} data-shell={shell}>
@@ -158,7 +181,12 @@ export function Sidebar({
               <XIcon />
             </button>
           </div>
-          <Controls value={value} onChange={onChange} draw={draw} />
+          <Controls
+            value={value}
+            onChange={onChange}
+            draw={draw}
+            selection={selection}
+          />
         </div>
       ) : null}
     </>

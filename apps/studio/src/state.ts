@@ -30,6 +30,8 @@ export type DebugState = {
     undo: boolean;
     clear: boolean;
     minimize: boolean;
+    select: boolean;
+    text: boolean;
   };
 };
 
@@ -58,6 +60,8 @@ export const defaults: DebugState = {
     undo: true,
     clear: true,
     minimize: true,
+    select: true,
+    text: true,
   },
 };
 
@@ -76,4 +80,6 @@ export const CONTROLS = [
   "undo",
   "clear",
   "minimize",
+  "select",
+  "text",
 ] as const;

@@ -36,7 +36,7 @@ export function ShapeTools({
   );
 }
 
-/** The four marks, drawn small in the same line style as the other glyphs. */
+/** The six marks, drawn small in the same line style as the other glyphs. */
 function Glyph({ kind }: { kind: ShapeKind }) {
   const common = {
     width: 14,
@@ -73,6 +73,20 @@ function Glyph({ kind }: { kind: ShapeKind }) {
         <svg {...common}>
           <path d="M2.5 11.5L8.5 5.5" />
           <path d="M6.5 5.5h2v2" />
+        </svg>
+      );
+    case "diamond":
+      return (
+        <svg {...common}>
+          <path d="M7 2.5 11.5 7 7 11.5 2.5 7Z" />
+        </svg>
+      );
+    case "double-arrow":
+      return (
+        <svg {...common}>
+          <path d="M2.5 11.5 11.5 2.5" />
+          <path d="M6.5 2.5h5v5" />
+          <path d="M7.5 11.5h-5v-5" />
         </svg>
       );
   }

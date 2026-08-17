@@ -1,21 +1,31 @@
 import {
   useCallback,
+  useEffect,
   useId,
   useMemo,
   useRef,
   useState,
 } from "react";
 import {
-  dotRadius,
   anchorsToShape,
+  boundsOf,
+  centreOf,
+  dashArray,
+  dotRadius,
   eraseLayers,
   figureMarkup,
+  hitTest,
+  lineHeight,
+  marqueeHits,
   nextId,
   polylinePath,
   strokePath,
+  translateStroke,
+  unionBounds,
 } from "../engine/geometry";
 import { PEN_BY_ID } from "../engine/pens";
-import type { Board, Point, ShapeKind } from "../engine/types";
+import { HAND, measureLines } from "../engine/text";
+import type { Board, FigureDash, FigureFill, Point, ShapeKind, Stroke } from "../engine/types";
 import type { DrawingController } from "../hooks/use-drawing";
 
 export type Tool =
@@ -33,7 +43,12 @@ export type Tool =
       color: string;
       size: number;
       opacity: number;
-    };
+    }
+  | { kind: "select" }
+  | { kind: "text"; color: string; size: number; opacity: number };
+
+/** What part of the board is in view: top-left corner and zoom factor. */
+export type View = { x: number; y: number; k: number };
 
 export type DrawSurfaceProps = {
   drawing: DrawingController;
@@ -41,6 +56,13 @@ export type DrawSurfaceProps = {
   /** CSS colour, `"transparent"` to paint nothing, or `"checker"`. */
   background?: string;
   tool: Tool;
+  /** The part of the board in view. Zoom is about the pointer; the wheel
+   *  pans unless a modifier turns it into zoom. */
+  view?: View;
+  onViewChange?: (view: View) => void;
+  /** The ids of the elements in hand. */
+  selection?: number[];
+  onSelection?: (ids: number[]) => void;
   /** Show a ring at the pointer at the brush's true size. Off for touch-only. */
   showBrushCursor?: boolean;
   /** Ignore all input — the surface is inert but still shows the drawing. */
@@ -49,7 +71,6 @@ export type DrawSurfaceProps = {
   style?: React.CSSProperties;
 };
 
-/** The drawing surface itself — pointer handling and rendering, no chrome. */
 /** Points laid along a straight run, rather than just its two ends. */
 function runPoints(from: Point, to: Point, pressure: number): Point[] {
   const run = Math.hypot(to[0] - from[0], to[1] - from[1]);
@@ -66,11 +87,47 @@ function runPoints(from: Point, to: Point, pressure: number): Point[] {
   return out;
 }
 
+/** A zoomed view is still letterboxed; the viewBox is the visible region. */
+export const ZOOM_MIN = 0.2;
+export const ZOOM_MAX = 8;
+
+/** What a pointer is doing on the surface. */
+type Gesture =
+  | { mode: "none" }
+  | { mode: "draw" }
+  | {
+      mode: "pan";
+      startX: number;
+      startY: number;
+      vx: number;
+      vy: number;
+    }
+  | { mode: "move"; ids: number[] }
+  | { mode: "resize"; ids: number[]; handle: number; union: { x: number; y: number; w: number; h: number } }
+  | { mode: "rotate"; ids: number[]; center: [number, number] }
+  | { mode: "marquee" };
+
+/** The eight resize points, corner to corner, clockwise. */
+const HANDLES = [
+  [-1, -1],
+  [0, -1],
+  [1, -1],
+  [1, 0],
+  [1, 1],
+  [0, 1],
+  [-1, 1],
+  [-1, 0],
+] as const;
+
 export function DrawSurface({
   drawing,
   board,
   background = "#ffffff",
   tool,
+  view,
+  onViewChange,
+  selection = [],
+  onSelection,
   showBrushCursor = true,
   disabled = false,
   className,
@@ -81,10 +138,13 @@ export function DrawSurface({
 
   const [current, setCurrent] = useState<Point[]>([]);
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
+  /** The marquee being dragged out, in board coordinates. */
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   const drawingNow = useRef(false);
   const pointsRef = useRef<Point[]>([]);
   const activePointer = useRef<number | null>(null);
+  const gesture = useRef<Gesture>({ mode: "none" });
   /**
    * Palm rejection: once a stylus has been seen on this surface, ignore touch
    * entirely. Resting a hand on a tablet while drawing is the normal way to
@@ -94,38 +154,124 @@ export function DrawSurface({
 
   /** State for drawing in straight runs while shift is held. */
   const straight = useRef<{
-    /** The corner this run grows from. */
     anchor: Point;
-    /** The direction it settled into, once it had the length to have one. */
     heading: number | null;
-    /** Everything already drawn, up to and including the anchor. */
     settled: Point[];
   } | null>(null);
 
   /** Whether the stroke in progress carries real hardware pressure. */
   const realPressure = useRef(false);
 
+  const state = useRef({ tool, drawing, selection, view, onViewChange, onSelection });
+  state.current = { tool, drawing, selection, view, onViewChange, onSelection };
+  const viewRef = useRef(view ?? { x: 0, y: 0, k: 1 });
+  viewRef.current = view ?? { x: 0, y: 0, k: 1 };
+
   const toBoard = useCallback(
     (clientX: number, clientY: number) => {
       const el = ref.current;
       if (!el) return { x: 0, y: 0 };
       const r = el.getBoundingClientRect();
+      const v = viewRef.current;
+      const vw = board.w / v.k;
+      const vh = board.h / v.k;
       // The viewBox is letterboxed by preserveAspectRatio, so it does NOT fill
-      // the element whenever the aspect ratios differ. Mapping as though it did
-      // puts the ink up to ~50px away from the pointer at the edges.
-      const scale = Math.min(r.width / board.w, r.height / board.h);
-      const offsetX = (r.width - board.w * scale) / 2;
-      const offsetY = (r.height - board.h * scale) / 2;
+      // the element whenever the aspect ratios differ. Mapping as though it
+      // did puts the ink up to ~50px away from the pointer at the edges.
+      const scale = Math.min(r.width / vw, r.height / vh);
+      const offsetX = (r.width - vw * scale) / 2;
+      const offsetY = (r.height - vh * scale) / 2;
       return {
-        x: (clientX - r.left - offsetX) / scale,
-        y: (clientY - r.top - offsetY) / scale,
+        x: v.x + (clientX - r.left - offsetX) / scale,
+        y: v.y + (clientY - r.top - offsetY) / scale,
       };
     },
     [board.w, board.h],
   );
 
-  const state = useRef({ tool, drawing });
-  state.current = { tool, drawing };
+  /** The screen scale the view is rendered at, and its letterbox offset. */
+  const screenScale = useCallback(() => {
+    const el = ref.current;
+    const v = viewRef.current;
+    const r = el?.getBoundingClientRect();
+    if (!r || !r.width) return { scale: 1, ox: 0, oy: 0 };
+    const vw = board.w / v.k;
+    const vh = board.h / v.k;
+    const scale = Math.min(r.width / vw, r.height / vh);
+    return { scale, ox: (r.width - vw * scale) / 2, oy: (r.height - vh * scale) / 2 };
+  }, [board.w, board.h]);
+
+  /** How the view is nudged, from a host's button or the pointer. */
+  const changeView = useCallback(
+    (next: View) => {
+      const k = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next.k));
+      state.current.onViewChange?.({ x: next.x, y: next.y, k });
+    },
+    [],
+  );
+
+  // The wheel pans; ctrl/cmd turns it into a zoom about the pointer. A native
+  // listener, because React can't mark it passive:false.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const v = viewRef.current;
+      const p = toBoard(e.clientX, e.clientY);
+      if (e.ctrlKey || e.metaKey) {
+        const k = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v.k * Math.exp(-e.deltaY * 0.0015)));
+        if (k === v.k) return;
+        // Keep the board point under the cursor fixed: the view moves so
+        // that point lands where it already is on screen.
+        const { scale: s, ox, oy } = screenScale();
+        const vw = board.w / k;
+        const vh = board.h / k;
+        const s2 = Math.min(el.getBoundingClientRect().width / vw, el.getBoundingClientRect().height / vh);
+        const ox2 = (el.getBoundingClientRect().width - vw * s2) / 2;
+        const oy2 = (el.getBoundingClientRect().height - vh * s2) / 2;
+        const sx = (e.clientX - el.getBoundingClientRect().left - ox) / s;
+        const sy = (e.clientY - el.getBoundingClientRect().top - oy) / s;
+        changeView({
+          x: p.x - (e.clientX - el.getBoundingClientRect().left - ox2) / s2,
+          y: p.y - (e.clientY - el.getBoundingClientRect().top - oy2) / s2,
+          k,
+        });
+        void sx;
+        void sy;
+        return;
+      }
+      const { scale: s } = screenScale();
+      changeView({ x: v.x + e.deltaX / s, y: v.y + e.deltaY / s, k: v.k });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [board.w, board.h, toBoard, screenScale, changeView]);
+
+  // Space turns the pointer into a pan hand, anywhere over the page.
+  const spaceHeld = useRef(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      if (
+        (e.target as HTMLElement)?.closest?.("input,textarea,[contenteditable]")
+      ) {
+        return;
+      }
+      if (e.type === "keydown") {
+        spaceHeld.current = true;
+        e.preventDefault();
+      } else {
+        spaceHeld.current = false;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
+    };
+  }, []);
 
   const ignore = (e: React.PointerEvent) => {
     if (disabled) return true;
@@ -133,8 +279,109 @@ export function DrawSurface({
     return e.pointerType === "touch" && sawPen.current;
   };
 
+  /** The strokes in hand, by id, in board order. */
+  const selectedStrokes = useCallback(
+    (ids: number[]) => {
+      const set = new Set(ids);
+      return drawing.strokes.filter((s) => set.has(s.id));
+    },
+    [drawing.strokes],
+  );
+
+  /** The union of the selection's boxes, padded so thin marks stay grabbable. */
+  const selUnion = useCallback((ids: number[]) => {
+    const b = unionBounds(selectedStrokes(ids));
+    return { x: b.x - 6, y: b.y - 6, w: b.w + 12, h: b.h + 12 };
+  }, [selectedStrokes]);
+
+  /** Which resize point (or the rotate handle) a board point is on. */
+  const handleAt = useCallback(
+    (x: number, y: number, ids: number[]) => {
+      if (!ids.length) return null;
+      const k = viewRef.current.k;
+      const grab = 11 / k;
+      const u = selUnion(ids);
+      const cx = u.x + u.w / 2;
+      const spots: [number, number][] = HANDLES.map(([hx, hy]) => [
+        u.x + (u.w / 2) * (hx + 1),
+        u.y + (u.h / 2) * (hy + 1),
+      ]);
+      for (let i = 0; i < spots.length; i++) {
+        if (Math.hypot(x - spots[i][0], y - spots[i][1]) <= grab) return i;
+      }
+      // The rotate handle sits above the top edge, on its own stem.
+      if (Math.hypot(x - cx, y - (u.y - 26 / k)) <= grab) return 8;
+      return null;
+    },
+    [selUnion],
+  );
+
+  /** Expand a click on one member to its whole group. */
+  const expandGroup = useCallback(
+    (id: number) => {
+      const st = drawing.strokes.find((s) => s.id === id);
+      if (!st?.group) return [id];
+      return drawing.strokes.filter((s) => s.group === st.group).map((s) => s.id);
+    },
+    [drawing.strokes],
+  );
+
+  /** Transform every selected element by the same rule. */
+  const mapSelected = useCallback(
+    (ids: number[], fn: (s: Stroke) => Stroke): Stroke[] =>
+      drawing.strokes.map((s) => (ids.includes(s.id) ? fn(s) : s)),
+    [drawing.strokes],
+  );
+
+  const startSelectGesture = (x: number, y: number, e: React.PointerEvent) => {
+    const st = state.current;
+    const ids = st.selection;
+
+    // A resize or rotate handle of the current selection comes first.
+    if (ids.length) {
+      const h = handleAt(x, y, ids);
+      if (h !== null) {
+        if (h === 8) {
+          const u = selUnion(ids);
+          const center = [u.x + u.w / 2, u.y + u.h / 2] as [number, number];
+          gesture.current = { mode: "rotate", ids, center };
+        } else {
+          gesture.current = { mode: "resize", ids, handle: h, union: selUnion(ids) };
+        }
+        drawing.begin();
+        return;
+      }
+    }
+
+    // Topmost element first — the last one in the array.
+    for (let i = drawing.strokes.length - 1; i >= 0; i--) {
+      const s = drawing.strokes[i];
+      if (s.erase || s.locked) continue;
+      if (!hitTest(s, x, y)) continue;
+      const picked = ids.includes(s.id) ? ids : expandGroup(s.id);
+      if (!ids.includes(s.id)) {
+        st.onSelection?.(picked);
+        state.current.selection = picked;
+      }
+      gesture.current = { mode: "move", ids: picked };
+      drawing.begin();
+      return;
+    }
+
+    // Empty ground: a marquee. The selection clears on release if it never
+    // moved; this way one stray pixel doesn't wipe a careful selection.
+    gesture.current = { mode: "marquee" };
+    setMarquee({ x, y, w: 0, h: 0 });
+    void e;
+  };
+
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (ignore(e)) return;
+    // While a text is being edited, only the textarea itself matters.
+    if (editing) {
+      if (!(e.target as Element).closest("foreignObject")) commitText();
+      return;
+    }
     // One pointer at a time: a second finger is a pan/zoom gesture, not a
     // second stroke.
     if (activePointer.current !== null) return;
@@ -147,7 +394,26 @@ export function DrawSurface({
     }
 
     const { x, y } = toBoard(e.clientX, e.clientY);
+
+    // Middle button or the space hand: pan.
+    if (e.button === 1 || spaceHeld.current) {
+      const v = viewRef.current;
+      gesture.current = { mode: "pan", startX: e.clientX, startY: e.clientY, vx: v.x, vy: v.y };
+      return;
+    }
+
+    if (tool.kind === "select") {
+      startSelectGesture(x, y, e);
+      return;
+    }
+
+    if (tool.kind === "text") {
+      beginText({ x, y });
+      return;
+    }
+
     drawingNow.current = true;
+    gesture.current = { mode: "draw" };
     straight.current = null;
 
     // An eraser pass is recorded exactly like a mark — it just subtracts.
@@ -161,8 +427,132 @@ export function DrawSurface({
     if (ignore(e)) return;
     const { x, y } = toBoard(e.clientX, e.clientY);
     if (e.pointerType !== "touch") setHover({ x, y });
+    if (e.pointerId !== activePointer.current) return;
 
-    if (!drawingNow.current || e.pointerId !== activePointer.current) return;
+    const g = gesture.current;
+
+    if (g.mode === "pan") {
+      const { scale: s } = screenScale();
+      changeView({
+        x: g.vx + (e.clientX - g.startX) / s,
+        y: g.vy + (e.clientY - g.startY) / s,
+        k: viewRef.current.k,
+      });
+      return;
+    }
+
+    if (g.mode === "move") {
+      const start = pointsRef.current[0] ?? [x, y];
+      const dx = x - start[0];
+      const dy = y - start[1];
+      drawing.update(
+        mapSelected(g.ids, (s) => translateStroke(s, dx, dy)),
+      );
+      return;
+    }
+
+    if (g.mode === "resize") {
+      const start = pointsRef.current[0] ?? [x, y];
+      const u = g.union;
+      const dx = x - start[0];
+      const dy = y - start[1];
+      const [hx, hy] = HANDLES[g.handle];
+      const left = hx < 0;
+      const top = hy < 0;
+      // The corner opposite the handle stays put.
+      let nx = left ? u.x + dx : u.x;
+      let ny = top ? u.y + dy : u.y;
+      let nw = left ? u.w - dx : u.w + dx;
+      let nh = top ? u.h - dy : u.h + dy;
+      if (e.shiftKey) {
+        const f = Math.max(nw / u.w, nh / u.h);
+        nw = u.w * f;
+        nh = u.h * f;
+        nx = left ? u.x + (u.w - nw) : u.x;
+        ny = top ? u.y + (u.h - nh) : u.y;
+      }
+      if (nw < 8 || nh < 8) return;
+      const fx = (b: { x: number; w: number }) => ({
+        x: nx + ((b.x - u.x) / u.w) * nw,
+        w: (b.w / u.w) * nw,
+      });
+      const fy = (b: { y: number; h: number }) => ({
+        y: ny + ((b.y - u.y) / u.h) * nh,
+        h: (b.h / u.h) * nh,
+      });
+      drawing.update(
+        mapSelected(g.ids, (s) => {
+          if (s.figure) {
+            const f = s.figure;
+            const bx = fx(f);
+            const by = fy(f);
+            return { ...s, figure: { ...f, ...bx, ...by } };
+          }
+          if (s.image || s.text) {
+            const part = (s.image ?? s.text)!;
+            const p0 = s.points[0] ?? [0, 0, 0.5];
+            const bx = fx({ x: p0[0], w: part.w });
+            const by = fy({ y: p0[1], h: part.h });
+            return {
+              ...s,
+              points: [[bx.x, by.y, p0[2]]],
+              image: s.image ? { ...s.image, w: bx.w, h: by.h } : undefined,
+              text: s.text
+                ? {
+                    ...s.text,
+                    w: bx.w,
+                    h: by.h,
+                    size: Math.max(6, s.text.size * (by.h / part.h)),
+                  }
+                : undefined,
+            };
+          }
+          const b = boundsOf(s);
+          const bx = fx(b);
+          const by = fy(b);
+          const sx = b.w ? bx.w / b.w : 1;
+          const sy = b.h ? by.h / b.h : 1;
+          return {
+            ...s,
+            points: s.points.map(([px, py, pr]) => [
+              bx.x + (px - b.x) * sx,
+              by.y + (py - b.y) * sy,
+              pr,
+            ]),
+          };
+        }),
+      );
+      return;
+    }
+
+    if (g.mode === "rotate") {
+      const start = pointsRef.current[0] ?? [x, y];
+      const [cx, cy] = g.center;
+      const a0 = Math.atan2(start[1] - cy, start[0] - cx);
+      let a = Math.atan2(y - cy, x - cx) - a0;
+      if (e.shiftKey) a = Math.round(a / (Math.PI / 12)) * (Math.PI / 12);
+      const deg = (a * 180) / Math.PI;
+      drawing.update(
+        mapSelected(g.ids, (s) => ({
+          ...s,
+          rotate: Math.round((((s.rotate ?? 0) + deg) % 360) * 100) / 100,
+        })),
+      );
+      return;
+    }
+
+    if (g.mode === "marquee") {
+      const start = pointsRef.current[0] ?? [x, y];
+      setMarquee({
+        x: Math.min(start[0], x),
+        y: Math.min(start[1], y),
+        w: Math.abs(x - start[0]),
+        h: Math.abs(y - start[1]),
+      });
+      return;
+    }
+
+    if (!drawingNow.current || g.mode !== "draw") return;
 
     const pts = pointsRef.current;
     const pressure = e.pressure || 0.5;
@@ -170,7 +560,12 @@ export function DrawSurface({
     // A figure is a drag between two anchors, not a traced path: the preview
     // grows from where the pointer went down and is redrawn each move. Shift
     // holds it to a square or to the eight compass points.
-    if (tool.kind !== "pen" && tool.kind !== "eraser") {
+    if (
+      tool.kind !== "pen" &&
+      tool.kind !== "eraser" &&
+      tool.kind !== "select" &&
+      tool.kind !== "text"
+    ) {
       const start = pts[0];
       if (!start) return;
       const end: Point = [x, y, pressure];
@@ -191,17 +586,6 @@ export function DrawSurface({
     }
 
     if (e.shiftKey) {
-      /*
-        A straight run, the way Photoshop constrains a brush.
-
-        Movement locks to the nearest of eight directions — the two axes and
-        the four diagonals — and everything off that line is discarded, so the
-        line is exactly straight however much the hand wobbles. The direction
-        is settled once and then left alone: letting it switch mid-stroke means
-        a stroke can turn a corner by accident, and the guarantee that shift
-        gives you a straight line is worth more than being able to draw an L
-        without letting go.
-      */
       if (!straight.current) {
         straight.current = {
           anchor: pts[pts.length - 1] ?? [x, y, pressure],
@@ -214,20 +598,12 @@ export function DrawSurface({
       const dx = x - st.anchor[0];
       const dy = y - st.anchor[1];
 
-      // Wait for a clear movement before committing. Judge it too early and
-      // the direction is decided by the shake of a hand pressing a button —
-      // and once locked it is locked, so guessing wrong costs the whole run.
       if (st.heading === null) {
         if (Math.hypot(dx, dy) < 16) return;
-        // To the nearest eighth of a turn, so the diagonals are as available
-        // as the axes — a 45° line is the one people reach for shift for
-        // nearly as often as a level one.
         st.heading =
           (Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI) / 4;
       }
 
-      // Projected onto that direction: how far off the line the hand strays is
-      // simply discarded, which is what keeps the run perfectly straight.
       const cos = Math.cos(st.heading);
       const sin = Math.sin(st.heading);
       const along = dx * cos + dy * sin;
@@ -237,10 +613,7 @@ export function DrawSurface({
         pressure,
       ];
 
-      pointsRef.current = [
-        ...st.settled,
-        ...runPoints(st.anchor, tip, pressure),
-      ];
+      pointsRef.current = [...st.settled, ...runPoints(st.anchor, tip, pressure)];
       setCurrent(pointsRef.current);
       return;
     }
@@ -250,15 +623,48 @@ export function DrawSurface({
     // Drop points closer than a screen pixel — at high zoom this is the
     // difference between a smooth line and thousands of redundant samples.
     const last = pts[pts.length - 1];
-    if (last && Math.hypot(x - last[0], y - last[1]) < 1.1) return;
+    if (last && Math.hypot(x - last[0], y - last[1]) < 1.1 / viewRef.current.k) return;
 
     pointsRef.current = [...pts, [x, y, pressure]];
     setCurrent(pointsRef.current);
   };
 
-  const endGesture = (e?: React.PointerEvent) => {
+  const finishGesture = (e?: React.PointerEvent) => {
     if (e && e.pointerId !== activePointer.current) return;
     activePointer.current = null;
+
+    const g = gesture.current;
+    gesture.current = { mode: "none" };
+
+    if (g.mode === "pan") return;
+
+    // A marquee settles its picks on release; a click that never grew one
+    // clears the selection instead.
+    if (g.mode === "marquee") {
+      const st = state.current;
+      const start = pointsRef.current[0];
+      const m = marquee;
+      setMarquee(null);
+      const grew = start && m && (m.w > 3 || m.h > 3);
+      if (grew && m) {
+        const hits = marqueeHits(drawing.strokes, m);
+        st.onSelection?.(hits.map((s) => s.id));
+      } else if (st.selection.length) {
+        st.onSelection?.([]);
+      }
+      drawingNow.current = false;
+      pointsRef.current = [];
+      setCurrent([]);
+      return;
+    }
+
+    if (g.mode === "move" || g.mode === "resize" || g.mode === "rotate") {
+      drawing.end();
+      drawingNow.current = false;
+      pointsRef.current = [];
+      setCurrent([]);
+      return;
+    }
 
     if (!drawingNow.current) return;
     drawingNow.current = false;
@@ -271,54 +677,199 @@ export function DrawSurface({
 
     // A figure commits its two anchors and the box they describe; a tap with
     // no drag still deserves a dot-sized square or circle.
-    if (tool.kind !== "pen" && tool.kind !== "eraser") {
+    if (
+      tool.kind !== "pen" &&
+      tool.kind !== "eraser" &&
+      tool.kind !== "select" &&
+      tool.kind !== "text"
+    ) {
       const a = pts[0];
       const b = pts[pts.length - 1] ?? a;
       let figure = anchorsToShape(tool.kind, a, b);
       if (
         Math.hypot(b[0] - a[0], b[1] - a[1]) < 1 &&
-        (tool.kind === "rect" || tool.kind === "ellipse")
+        (tool.kind === "rect" || tool.kind === "ellipse" || tool.kind === "diamond")
       ) {
         const d = Math.max(12, tool.size * 2.5);
         figure = { kind: tool.kind, x: a[0] - d / 2, y: a[1] - d / 2, w: d, h: d };
       }
-      drawing.commit([
-        ...drawing.strokes,
-        {
-          id: nextId(),
-          pen: "pen" as const,
-          color: tool.color,
-          size: tool.size,
-          opacity: tool.opacity,
-          points: pts,
-          figure,
-        },
-      ]);
+      const stroke: Stroke = {
+        id: nextId(),
+        pen: "pen" as const,
+        color: tool.color,
+        size: tool.size,
+        opacity: tool.opacity,
+        points: pts,
+        figure,
+      };
+      drawing.commit([...drawing.strokes, stroke]);
+      state.current.onSelection?.([stroke.id]);
       return;
     }
 
-    drawing.commit([
-      ...drawing.strokes,
-      tool.kind === "eraser"
-        ? {
-            id: nextId(),
-            pen: "pen" as const,
-            color: "#000",
-            size: tool.size,
-            opacity: 1,
-            points: pts,
-            erase: true,
-          }
-        : {
-            id: nextId(),
-            pen: tool.pen,
-            color: tool.color,
-            size: tool.size,
-            opacity: tool.opacity,
-            points: pts,
-            shape: { ...tool.shape, simulatePressure: !realPressure.current },
-          },
-    ]);
+    // A traced path: a pen's shape, or the eraser's blanked-out marks.
+    if (tool.kind === "pen" || tool.kind === "eraser") {
+      drawing.commit([
+        ...drawing.strokes,
+        tool.kind === "eraser"
+          ? {
+              id: nextId(),
+              pen: "pen" as const,
+              color: "#000",
+              size: tool.size,
+              opacity: 1,
+              points: pts,
+              erase: true,
+            }
+          : {
+              id: nextId(),
+              pen: tool.pen,
+              color: tool.color,
+              size: tool.size,
+              opacity: tool.opacity,
+              points: pts,
+              shape: { ...tool.shape, simulatePressure: !realPressure.current },
+            },
+      ]);
+    }
+  };
+
+  /*
+   * Text: a click with the text tool drops a mark and starts typing into an
+   * overlay; a double-click on an existing mark reopens it. Everything stays
+   * uncommitted until the overlay goes away.
+   */
+  type TextDraft = {
+    id: number | null;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    size: number;
+    color: string;
+    font: string;
+    bold?: boolean;
+    italic?: boolean;
+    content: string;
+  };
+  const [editing, setEditing] = useState<TextDraft | null>(null);
+  const editingRef = useRef<TextDraft | null>(null);
+  editingRef.current = editing;
+  const originalText = useRef<Stroke | null>(null);
+
+  const beginText = (at: { x: number; y: number }, existing?: Stroke) => {
+    if (existing) {
+      const t = existing.text!;
+      const [x, y] = existing.points[0] ?? [0, 0];
+      originalText.current = existing;
+      drawing.begin();
+      setEditing({
+        id: existing.id,
+        x,
+        y,
+        w: t.w,
+        h: t.h,
+        size: t.size,
+        color: existing.color,
+        font: t.font,
+        bold: t.bold,
+        italic: t.italic,
+        content: t.content,
+      });
+      return;
+    }
+    const t = state.current.tool;
+    if (t.kind !== "text") return;
+    originalText.current = null;
+    setEditing({
+      id: null,
+      x: at.x,
+      y: at.y,
+      w: 4,
+      h: lineHeight(t.size),
+      size: t.size,
+      color: t.color,
+      font: HAND,
+      content: "",
+    });
+  };
+
+  /** Measure the draft and write it (or update its mark). */
+  const applyText = (draft: TextDraft) => {
+    const laid = measureLines(draft.content, draft.size, draft.font, draft.bold, draft.italic);
+    if (draft.id === null) {
+      if (!draft.content) return null;
+      const stroke: Stroke = {
+        id: nextId(),
+        pen: "pen" as const,
+        color: draft.color,
+        size: draft.size,
+        opacity: 1,
+        points: [[draft.x, draft.y, 0.5]],
+        text: {
+          content: draft.content,
+          size: draft.size,
+          w: laid.w,
+          h: laid.h,
+          font: draft.font,
+          bold: draft.bold,
+          italic: draft.italic,
+        },
+      };
+      return stroke;
+    }
+    return drawing.strokes.find((s) => s.id === draft.id) ?? null;
+  };
+
+  const commitText = () => {
+    const draft = editingRef.current;
+    if (!draft) return;
+    setEditing(null);
+    const isNew = draft.id === null;
+    const stroke = applyText(draft);
+    if (isNew) {
+      if (stroke) {
+        drawing.commit([...drawing.strokes, stroke]);
+        state.current.onSelection?.([stroke.id]);
+      }
+      return;
+    }
+    // Update the existing mark with the typed text, measured afresh.
+    const laid = measureLines(draft.content, draft.size, draft.font, draft.bold, draft.italic);
+    if (draft.content) {
+      drawing.update(
+        drawing.strokes.map((s) =>
+          s.id === draft.id && s.text
+            ? {
+                ...s,
+                text: {
+                  ...s.text,
+                  content: draft.content,
+                  size: draft.size,
+                  w: laid.w,
+                  h: laid.h,
+                  bold: draft.bold,
+                  italic: draft.italic,
+                },
+              }
+            : s,
+        ),
+      );
+    } else {
+      drawing.update(drawing.strokes.filter((s) => s.id !== draft.id));
+    }
+    drawing.end();
+    originalText.current = null;
+  };
+
+  const cancelText = () => {
+    const draft = editingRef.current;
+    if (!draft) return;
+    setEditing(null);
+    if (draft.id === null) return; // a draft never touched the strokes
+    drawing.update(drawing.strokes); // no-op keeps history clean
+    drawing.end();
+    originalText.current = null;
   };
 
   // Committed outlines are recomputed only when the stroke set changes, never
@@ -340,6 +891,39 @@ export function DrawSurface({
             d,
             head,
             width: st.size,
+            color: st.color,
+            opacity: st.opacity,
+            fill: st.figure.fill ?? false,
+            dash: st.figure.dash ?? "solid",
+          };
+        }
+        if (st.image) {
+          const [x, y] = st.points[0] ?? [0, 0];
+          return {
+            id: st.id,
+            kind: "image" as const,
+            data: st.image.data,
+            x,
+            y,
+            w: st.image.w,
+            h: st.image.h,
+            opacity: st.opacity,
+          };
+        }
+        if (st.text) {
+          const [x, y] = st.points[0] ?? [0, 0];
+          return {
+            id: st.id,
+            kind: "text" as const,
+            content: st.text.content,
+            x,
+            y,
+            size: st.text.size,
+            w: st.text.w,
+            h: st.text.h,
+            font: st.text.font,
+            bold: st.text.bold,
+            italic: st.text.italic,
             color: st.color,
             opacity: st.opacity,
           };
@@ -371,42 +955,146 @@ export function DrawSurface({
     hover.x <= board.w &&
     hover.y <= board.h;
 
+  const v = viewRef.current;
+
+  // The selection chrome, in the board's own units.
+  const selectionChrome = (() => {
+    const ids = selection.filter((id) => drawing.strokes.some((s) => s.id === id));
+    if (!ids.length) return null;
+    const u = selUnion(ids);
+    const k = v.k;
+    const s = 1 / k;
+    const cx = u.x + u.w / 2;
+    const cy = u.y + u.h / 2;
+    const r = 5.5 * s;
+    const spot = (hx: number, hy: number) => ({
+      x: u.x + (u.w / 2) * (hx + 1) - r,
+      y: u.y + (u.h / 2) * (hy + 1) - r,
+    });
+    const cursors = [
+      "nwse-resize", "ns-resize", "nesw-resize", "ew-resize",
+      "nwse-resize", "ns-resize", "nesw-resize", "ew-resize",
+    ];
+    return (
+      <g pointerEvents="none">
+        <rect
+          x={u.x}
+          y={u.y}
+          width={u.w}
+          height={u.h}
+          fill="none"
+          stroke="#3b82f6"
+          strokeWidth={1.5 * s}
+          strokeDasharray={`6 ${4 * s}`}
+        />
+        {HANDLES.map(([hx, hy], i) => {
+          const p = spot(hx, hy);
+          return (
+            <rect
+              key={i}
+              data-handle={i}
+              x={p.x}
+              y={p.y}
+              width={r * 2}
+              height={r * 2}
+              fill="#fff"
+              stroke="#3b82f6"
+              strokeWidth={1.5 * s}
+              style={{ cursor: cursors[i], pointerEvents: "all" }}
+            />
+          );
+        })}
+        {/* The rotate handle, on a stem above the top edge. */}
+        <line
+          x1={cx}
+          y1={u.y}
+          x2={cx}
+          y2={u.y - 26 * s}
+          stroke="#3b82f6"
+          strokeWidth={1.5 * s}
+        />
+        <circle
+          data-handle={8}
+          cx={cx}
+          cy={u.y - 26 * s}
+          r={r}
+          fill="#fff"
+          stroke="#3b82f6"
+          strokeWidth={1.5 * s}
+          style={{ cursor: "crosshair", pointerEvents: "all" }}
+        />
+        {/* The centre point: useful when rotating several things at once. */}
+        <circle cx={cx} cy={cy} r={2.5 * s} fill="#3b82f6" />
+      </g>
+    );
+  })();
+
+  const ringOn = showBrushCursor && tool.kind !== "select" && tool.kind !== "text";
+  const panning = gesture.current.mode === "pan" || spaceHeld.current;
+  const cursor = disabled
+    ? "default"
+    : panning
+      ? "grabbing"
+      : tool.kind === "select"
+        ? "default"
+        : tool.kind === "text"
+          ? "text"
+          : showBrushCursor
+            ? "none"
+            : "crosshair";
+
   return (
     <svg
       ref={ref}
       width="100%"
       height="100%"
-      viewBox={`0 0 ${board.w} ${board.h}`}
+      viewBox={`${v.x} ${v.y} ${board.w / v.k} ${board.h / v.k}`}
       className={className}
       style={{
         display: "block",
-        /*
-          A disabled surface gets out of the way completely.
-          
-          Gating the handler isn't enough when the surface is laid over a page:
-          it still swallows every scroll, selection and click underneath it, so
-          "drawing is off" reads to the user as "the page is broken". Off means
-          the layer isn't there.
-        */
         pointerEvents: disabled ? "none" : undefined,
-        // Essential on touch: without it the browser scrolls the page instead
-        // of letting a finger draw.
         touchAction: disabled ? "auto" : "none",
         WebkitUserSelect: disabled ? "auto" : "none",
         userSelect: disabled ? "auto" : "none",
         WebkitTapHighlightColor: "transparent",
-        cursor: disabled ? "default" : showBrushCursor ? "none" : "crosshair",
+        cursor,
         ...style,
       }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={endGesture}
-      onPointerCancel={endGesture}
+      onPointerUp={finishGesture}
+      onPointerCancel={finishGesture}
       onPointerLeave={(e) => {
         setHover(null);
-        endGesture(e);
+        finishGesture(e);
       }}
       onContextMenu={(e) => e.preventDefault()}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const file = Array.from(e.dataTransfer.files).find((f) =>
+          f.type.startsWith("image/"),
+        );
+        if (!file) return;
+        const p = toBoard(e.clientX, e.clientY);
+        readImageFile(file, p, state.current.drawing, (id) =>
+          state.current.onSelection?.([id]),
+        );
+      }}
+      onDoubleClick={(e) => {
+        // With the select tool, opening an existing mark for editing is a
+        // double-click, like every other editor.
+        if (tool.kind !== "select") return;
+        const { x, y } = toBoard(e.clientX, e.clientY);
+        for (let i = drawing.strokes.length - 1; i >= 0; i--) {
+          const s = drawing.strokes[i];
+          if (s.erase || s.locked || !s.text) continue;
+          if (hitTest(s, x, y)) {
+            beginText({ x, y }, s);
+            return;
+          }
+        }
+      }}
     >
       <defs>
         <pattern
@@ -420,16 +1108,21 @@ export function DrawSurface({
           <rect x="8" y="8" width="8" height="8" fill="#ececec" />
         </pattern>
         <clipPath id={`b-${uid}`}>
-          <rect x={0} y={0} width={board.w} height={board.h} />
+          <rect
+            x={v.x}
+            y={v.y}
+            width={board.w / v.k}
+            height={board.h / v.k}
+          />
         </clipPath>
       </defs>
 
       <g>
         <rect
-          x={0}
-          y={0}
-          width={board.w}
-          height={board.h}
+          x={v.x}
+          y={v.y}
+          width={board.w / v.k}
+          height={board.h / v.k}
           fill={
             background === "transparent"
               ? "none"
@@ -455,23 +1148,19 @@ export function DrawSurface({
               <g key={li} mask={cuts.length ? `url(#${maskId})` : undefined}>
                 {cuts.length > 0 && (
                   <defs>
-                    {/* White keeps, black removes. Stroking the eraser's path
-                        at the nub's width with round caps describes exactly the
-                        area it swept — so it takes a bite out of whatever it
-                        touches, including the edge of a thick mark. */}
                     <mask
                       id={maskId}
                       maskUnits="userSpaceOnUse"
-                      x={0}
-                      y={0}
-                      width={board.w}
-                      height={board.h}
+                      x={v.x}
+                      y={v.y}
+                      width={board.w / v.k}
+                      height={board.h / v.k}
                     >
                       <rect
-                        x={0}
-                        y={0}
-                        width={board.w}
-                        height={board.h}
+                        x={v.x}
+                        y={v.y}
+                        width={board.w / v.k}
+                        height={board.h / v.k}
                         fill="#fff"
                       />
                       {cuts.map((c, ci) => (
@@ -488,36 +1177,62 @@ export function DrawSurface({
                     </mask>
                   </defs>
                 )}
-                {layer.ink.map((s) =>
-                  s.kind === "figure" ? (
-                    <FigureShape
+                {layer.ink.map((s) => {
+                  const rot = drawing.strokes.find((st) => st.id === s.id);
+                  const rotate = rot?.rotate;
+                  const g =
+                    s.kind === "figure" ? (
+                      <FigureShape
+                        d={s.d}
+                        head={s.head}
+                        width={s.width}
+                        color={s.color}
+                        opacity={s.opacity}
+                        fill={s.fill}
+                        dash={s.dash}
+                      />
+                    ) : s.kind === "image" ? (
+                      <image
+                        x={s.x}
+                        y={s.y}
+                        width={s.w}
+                        height={s.h}
+                        href={s.data}
+                        preserveAspectRatio="none"
+                        opacity={s.opacity}
+                      />
+                    ) : s.kind === "text" ? (
+                      <TextShape {...s} />
+                    ) : s.d ? (
+                      <path
+                        d={s.d}
+                        fill={s.color}
+                        fillOpacity={s.opacity}
+                        style={s.blend ? { mixBlendMode: "multiply" } : undefined}
+                      />
+                    ) : s.dot ? (
+                      <circle
+                        cx={s.dot.x}
+                        cy={s.dot.y}
+                        r={s.dot.r}
+                        fill={s.color}
+                        fillOpacity={s.opacity}
+                        style={s.blend ? { mixBlendMode: "multiply" } : undefined}
+                      />
+                    ) : null;
+                  if (!g) return null;
+                  if (!rotate) return <g key={s.id}>{g}</g>;
+                  const b = boundsOf(rot!);
+                  const [cx, cy] = centreOf(b);
+                  return (
+                    <g
                       key={s.id}
-                      d={s.d}
-                      head={s.head}
-                      width={s.width}
-                      color={s.color}
-                      opacity={s.opacity}
-                    />
-                  ) : s.d ? (
-                    <path
-                      key={s.id}
-                      d={s.d}
-                      fill={s.color}
-                      fillOpacity={s.opacity}
-                      style={s.blend ? { mixBlendMode: "multiply" } : undefined}
-                    />
-                  ) : s.dot ? (
-                    <circle
-                      key={s.id}
-                      cx={s.dot.x}
-                      cy={s.dot.y}
-                      r={s.dot.r}
-                      fill={s.color}
-                      fillOpacity={s.opacity}
-                      style={s.blend ? { mixBlendMode: "multiply" } : undefined}
-                    />
-                  ) : null,
-                )}
+                      transform={`rotate(${rotate} ${cx} ${cy})`}
+                    >
+                      {g}
+                    </g>
+                  );
+                })}
               </g>
             );
           })}
@@ -540,6 +1255,8 @@ export function DrawSurface({
 
           {tool.kind !== "pen" &&
             tool.kind !== "eraser" &&
+            tool.kind !== "select" &&
+            tool.kind !== "text" &&
             current.length > 1 &&
             (() => {
               const { d, head } = figureMarkup(
@@ -556,11 +1273,93 @@ export function DrawSurface({
                 />
               );
             })()}
+
+          {/* The text being typed, live under the overlay. */}
+          {editing && (
+            <TextShape
+              id={editing.id ?? -1}
+              content={editing.content}
+              x={editing.x}
+              y={editing.y}
+              size={editing.size}
+              w={editing.w}
+              h={editing.h}
+              font={editing.font}
+              bold={editing.bold}
+              italic={editing.italic}
+              color={editing.color}
+              opacity={1}
+            />
+          )}
+
+          {marquee && (
+            <rect
+              x={marquee.x}
+              y={marquee.y}
+              width={marquee.w}
+              height={marquee.h}
+              fill="rgba(59,130,246,0.08)"
+              stroke="#3b82f6"
+              strokeWidth={1 / v.k}
+              strokeDasharray={`${5 / v.k} ${4 / v.k}`}
+            />
+          )}
+
+          {selectionChrome}
+
+          {/* The editing overlay, sized and positioned like the mark. */}
+          {editing && (
+            <foreignObject
+              x={editing.x}
+              y={editing.y}
+              width={Math.max(8, editing.w)}
+              height={Math.max(lineHeight(editing.size), editing.h)}
+            >
+              <div style={{ width: "100%", height: "100%" }}>
+                <textarea
+                  autoFocus
+                  value={editing.content}
+                  placeholder="Type…"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    boxSizing: "border-box",
+                    resize: "none",
+                    border: 0,
+                    outline: "none",
+                    padding: 0,
+                    background: "transparent",
+                    color: editing.color,
+                    fontFamily: editing.font,
+                    fontSize: editing.size,
+                    fontWeight: editing.bold ? 700 : 400,
+                    fontStyle: editing.italic ? "italic" : "normal",
+                    lineHeight: 1.35,
+                    overflow: "hidden",
+                    whiteSpace: "pre",
+                  }}
+                  onChange={(e) =>
+                    setEditing((d) => (d ? { ...d, content: e.target.value } : d))
+                  }
+                  onBlur={commitText}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      commitText();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      cancelText();
+                    }
+                  }}
+                />
+              </div>
+            </foreignObject>
+          )}
         </g>
 
         {/* Kept mounted and faded, so crossing onto the toolbar is a soft
             hand-off to the system cursor rather than a blink. */}
-        {showBrushCursor && lastHover.current && (
+        {ringOn && lastHover.current && (
           <g
             opacity={overBoard ? 1 : 0}
             style={{ transition: "opacity 120ms ease" }}
@@ -569,7 +1368,7 @@ export function DrawSurface({
             <BrushCursor
               tool={tool}
               at={lastHover.current}
-              scale={1}
+              scale={v.k}
               background={background}
             />
           </g>
@@ -580,24 +1379,101 @@ export function DrawSurface({
 }
 
 /**
- * A geometric figure, drawn the way an outline is on paper: a stroked shaft
- * at the tool's width, and a filled head on top for an arrow.
+ * Read an image file in at a board point, sized to the page, and commit it
+ * through the surface's own controller — selected on arrival.
  */
+export function readImageFile(
+  file: File,
+  at: { x: number; y: number },
+  drawing: DrawingController,
+  onAdded?: (id: number) => void,
+) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const data = reader.result as string;
+    const img = new Image();
+    img.onload = () => {
+      const max = 640;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const stroke: Stroke = {
+        id: nextId(),
+        pen: "pen" as const,
+        color: "#000",
+        size: 1,
+        opacity: 1,
+        points: [[at.x, at.y, 0.5]],
+        image: {
+          data,
+          w: Math.max(1, img.width * scale),
+          h: Math.max(1, img.height * scale),
+        },
+      };
+      drawing.commit([...drawing.strokes, stroke]);
+      onAdded?.(stroke.id);
+    };
+    img.src = data;
+  };
+  reader.readAsDataURL(file);
+}
+
+/** A geometric figure, drawn the way an outline is on paper: a stroked shaft
+    at the tool's width, a filled head on top for an arrow, and a fill when
+    the shape asks for one — a plain wash, or hatch lines for the drawn look. */
 function FigureShape({
   d,
   head,
   width,
   color,
   opacity,
+  fill,
+  dash,
 }: {
   d: string;
   head?: string;
   width: number;
   color: string;
   opacity: number;
+  fill?: FigureFill | boolean;
+  dash?: FigureDash;
 }) {
+  const uid = useId().replace(/:/g, "");
+  const closed = d.endsWith("Z");
+  const mode: FigureFill | null =
+    fill === true ? "solid" : fill === false || !fill ? null : fill;
+  const hatch = (id: string, angle: number) => (
+    <pattern
+      id={id}
+      width="8"
+      height="8"
+      patternUnits="userSpaceOnUse"
+      patternTransform={`rotate(${angle})`}
+    >
+      <line
+        x1="0"
+        y1="0"
+        x2="0"
+        y2="8"
+        stroke={color}
+        strokeOpacity={0.25 * opacity}
+        strokeWidth={1.2}
+      />
+    </pattern>
+  );
   return (
     <g opacity={opacity}>
+      {closed && mode === "solid" && (
+        <path d={d} fill={color} fillOpacity={0.22 * opacity} />
+      )}
+      {closed && (mode === "hachure" || mode === "cross-hatch") && (
+        <g>
+          <defs>
+            {hatch(`h-${uid}`, 45)}
+            {mode === "cross-hatch" && hatch(`x-${uid}`, -45)}
+          </defs>
+          <path d={d} fill={`url(#h-${uid})`} />
+          {mode === "cross-hatch" && <path d={d} fill={`url(#x-${uid})`} />}
+        </g>
+      )}
       <path
         d={d}
         fill="none"
@@ -605,9 +1481,57 @@ function FigureShape({
         strokeWidth={width}
         strokeLinecap="round"
         strokeLinejoin="round"
+        strokeDasharray={dash ? dashArray(dash as never) : undefined}
       />
       {head ? <path d={head} fill={color} /> : null}
     </g>
+  );
+}
+
+/** A committed text mark, one tspan per line. */
+function TextShape({
+  content,
+  x,
+  y,
+  size,
+  font,
+  bold,
+  italic,
+  color,
+  opacity,
+}: {
+  id: number;
+  content: string;
+  x: number;
+  y: number;
+  size: number;
+  w: number;
+  h: number;
+  font: string;
+  bold?: boolean;
+  italic?: boolean;
+  color: string;
+  opacity: number;
+}) {
+  const lineH = lineHeight(size);
+  const lines = content.split("\n");
+  return (
+    <text
+      x={x}
+      y={y + size * 0.85}
+      fontFamily={font}
+      fontSize={size}
+      fontWeight={bold ? 700 : undefined}
+      fontStyle={italic ? "italic" : undefined}
+      fill={color}
+      fillOpacity={opacity}
+    >
+      {lines.map((line, i) => (
+        <tspan key={i} x={x} dy={i === 0 ? 0 : lineH}>
+          {line}
+        </tspan>
+      ))}
+    </text>
   );
 }
 
@@ -638,7 +1562,7 @@ function BrushCursor({
   scale,
   background,
 }: {
-  tool: Tool;
+  tool: Exclude<Tool, { kind: "select" } | { kind: "text" }>;
   at: { x: number; y: number };
   scale: number;
   /** Tints the eraser's fill; the rings carry their own contrast. */
@@ -646,7 +1570,7 @@ function BrushCursor({
 }) {
   const hair = 1 / scale;
   const onDark = !isPale(background) && background !== "transparent";
-  const r = Math.max(tool.size / 2, MIN_RADIUS / scale);
+  const r = Math.max(tool.kind === "eraser" ? tool.size / 2 : tool.size / 2, MIN_RADIUS / scale);
 
   /*
    * One ring on a dark canvas, two on a light one.
@@ -687,7 +1611,6 @@ function BrushCursor({
           stroke={stroke}
           strokeWidth={hair}
         />
-        {/* A cross-hair marks the centre: an eraser is aimed, not drawn with. */}
         {!onDark && (
           <path
             d={`M${at.x - 3 * hair} ${at.y}h${6 * hair}M${at.x} ${at.y - 3 * hair}v${6 * hair}`}

@@ -14,7 +14,7 @@ import {
 } from "./icons";
 import { HexField, pickFromScreen, supportsEyeDropper } from "./HexField";
 import { Spectrum } from "./Spectrum";
-import { ShapeIcon, ToolIcon } from "./ToolIcon";
+import { ShapeIcon, ToolGlyph, ToolIcon } from "./ToolIcon";
 import { ToolMenu } from "./ToolMenu";
 import { useTooltips, type TooltipOptions } from "./Tooltip";
 import { TrashIcon } from "./TrashIcon";
@@ -108,6 +108,10 @@ export function Toolbar({
     clear?: boolean;
     custom?: boolean;
     minimize?: boolean;
+    /** The select tool; it and `text` default on. */
+    select?: boolean;
+    /** The text tool. */
+    text?: boolean;
   };
   onSelect: (id: ToolId) => void;
   onChange: (patch: Partial<ToolState>) => void;
@@ -187,6 +191,8 @@ export function Toolbar({
     undo: controls?.undo ?? true,
     clear: controls?.clear ?? true,
     minimize: controls?.minimize ?? true,
+    select: controls?.select ?? true,
+    text: controls?.text ?? true,
   };
 
   /* What the size control is called, given what it actually opens. */
@@ -282,6 +288,38 @@ export function Toolbar({
                 )}
 
                 {(show.undo || show.clear) && <span className={css.divider} />}
+
+                {(show.select || show.text) && (
+                  <>
+                    {show.select && (
+                      <button
+                        type="button"
+                        className={css.tool}
+                        data-active={tool.active === "select" || undefined}
+                        onClick={() => onSelect("select")}
+                        aria-label="Select"
+                        aria-pressed={tool.active === "select"}
+                        {...tip.bind("Select", shortcuts ? "V" : undefined)}
+                      >
+                        <ToolGlyph id="select" color={tool.color} />
+                      </button>
+                    )}
+                    {show.text && (
+                      <button
+                        type="button"
+                        className={css.tool}
+                        data-active={tool.active === "text" || undefined}
+                        onClick={() => onSelect("text")}
+                        aria-label="Text"
+                        aria-pressed={tool.active === "text"}
+                        {...tip.bind("Text", shortcuts ? "T" : undefined)}
+                      >
+                        <ToolGlyph id="text" color={tool.color} />
+                      </button>
+                    )}
+                    <span className={css.divider} />
+                  </>
+                )}
 
                 {pens.map((pen) => (
                   <button

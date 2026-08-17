@@ -2,6 +2,16 @@ import type { ShapeDef } from "../types";
 
 const r = (n: number) => Math.round(n * 10) / 10;
 
+/** The shared head geometry, used by both ends of the double-ended arrow. */
+function headAt(ex: number, ey: number, ang: number, head: number) {
+  const spread = 2.62; // 150° either way
+  const w1x = ex + Math.cos(ang - spread) * head;
+  const w1y = ey + Math.sin(ang - spread) * head;
+  const w2x = ex + Math.cos(ang + spread) * head;
+  const w2y = ey + Math.sin(ang + spread) * head;
+  return `M${r(ex)} ${r(ey)}L${r(w1x)} ${r(w1y)}L${r(w2x)} ${r(w2y)}Z`;
+}
+
 /** Arrow: a shaft with a filled head on the far anchor. A straight drag
     locks it to the nearest of the eight compass directions. */
 export const arrow: ShapeDef = {
@@ -22,14 +32,9 @@ export const arrow: ShapeDef = {
     const head = Math.min(Math.max(size * 3, 14), len * 0.4);
     const bx = ex - Math.cos(ang) * head * 0.6;
     const by = ey - Math.sin(ang) * head * 0.6;
-    const spread = 2.62; // 150° either way
-    const w1x = ex + Math.cos(ang - spread) * head;
-    const w1y = ey + Math.sin(ang - spread) * head;
-    const w2x = ex + Math.cos(ang + spread) * head;
-    const w2y = ey + Math.sin(ang + spread) * head;
     return {
       d: `M${r(x)} ${r(y)}L${r(bx)} ${r(by)}`,
-      head: `M${r(ex)} ${r(ey)}L${r(w1x)} ${r(w1y)}L${r(w2x)} ${r(w2y)}Z`,
+      head: headAt(ex, ey, ang, head),
     };
   },
   snap(w, h) {

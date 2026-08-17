@@ -1,6 +1,7 @@
 import { PageControls } from "./components/PageControls";
 import { ShapeTools } from "./components/ShapeTools";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { ZoomControl } from "./components/ZoomControl";
 import type { DebugState } from "./state";
 import type { ShapeKind } from "pencilart";
 import css from "./Debug.module.css";
@@ -27,6 +28,10 @@ export function Debug({
   canRedo,
   onUndo,
   onRedo,
+  zoom,
+  onZoom,
+  onZoomReset,
+  onZoomFit,
 }: {
   shell: "dark" | "light";
   onShell: (next: "dark" | "light") => void;
@@ -49,6 +54,11 @@ export function Debug({
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  /** The current zoom, as a whole-number percentage. */
+  zoom: number;
+  onZoom: (factor: number) => void;
+  onZoomReset: () => void;
+  onZoomFit: () => void;
 }) {
   return (
     <div className={css.bar}>
@@ -57,6 +67,13 @@ export function Debug({
       <ShapeTools shape={shape} onShape={onShape} />
 
       <ThemeToggle shell={shell} onShell={onShell} />
+
+      <ZoomControl
+        percent={zoom}
+        onZoom={onZoom}
+        onReset={onZoomReset}
+        onFit={onZoomFit}
+      />
 
       <PageControls
         page={page}

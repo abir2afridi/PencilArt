@@ -1,5 +1,12 @@
 import { useRef, useState } from "react";
-import { Draw, isShape, type DrawHandle, type ShapeKind, type Stroke } from "pencilart";
+import {
+  Draw,
+  isShape,
+  type DrawHandle,
+  type ShapeKind,
+  type Stroke,
+  type View,
+} from "pencilart";
 import { Debug, type DebugState, defaults } from "./Debug";
 import { Sidebar } from "./components/Sidebar";
 import css from "./App.module.css";
@@ -23,6 +30,10 @@ export default function App() {
   const draw = useRef<DrawHandle>(null);
   /** The shape in hand, mirrored from the surface so the header can show it. */
   const [shape, setShape] = useState<ShapeKind | null>(null);
+  /** The elements in hand, mirrored so the sidebar can act on them. */
+  const [selection, setSelection] = useState<number[]>([]);
+  /** The part of the board in view, mirrored so the header can zoom. */
+  const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
 
   /** A brand-new blank page, made current. */
   const addPage = () => {
@@ -91,11 +102,21 @@ export default function App() {
           canRedo={hist.canRedo}
           onUndo={() => draw.current?.undo()}
           onRedo={() => draw.current?.redo()}
+          zoom={Math.round(view.k * 100)}
+          onZoom={(factor) => draw.current?.zoomBy(factor)}
+          onZoomReset={() => draw.current?.zoomReset()}
+          onZoomFit={() => draw.current?.zoomFit()}
         />
       </header>
       {/* The controls down the left edge, and the book taking the rest. */}
       <div className={css.body} data-shell={shell}>
-        <Sidebar value={debug} onChange={setDebug} draw={draw} shell={shell} />
+        <Sidebar
+          value={debug}
+          onChange={setDebug}
+          draw={draw}
+          shell={shell}
+          selection={selection}
+        />
         <div className={css.book}>
         <div key={`page-${page}`} className={css.stage}>
           <Draw
@@ -120,6 +141,8 @@ export default function App() {
         depth={debug.depth}
         ink={debug.ink}
         onToolChange={(t) => setShape(isShape(t.active) ? t.active : null)}
+        onSelectionChange={setSelection}
+        onViewChange={setView}
         tooltips={debug.tooltips === false ? false : { scope: debug.tooltips }}
         eraser={debug.eraser}
         tools={debug.tools.length ? debug.tools : undefined}

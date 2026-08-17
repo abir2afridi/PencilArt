@@ -204,7 +204,13 @@ export type CtrlIconId =
   | "pens"
   | "motion"
   | "also"
-  | "export";
+  | "export"
+  | "arrange"
+  | "style"
+  | "text"
+  | "images"
+  | "import"
+  | "library";
 
 const CTRL_ICON_PATHS: Record<CtrlIconId, React.ReactNode> = {
   placement: (
@@ -267,6 +273,51 @@ const CTRL_ICON_PATHS: Record<CtrlIconId, React.ReactNode> = {
       <path d="M12 4v11" />
       <path d="M7 10l5 5 5-5" />
       <path d="M4 20h16" />
+    </>
+  ),
+  arrange: (
+    <>
+      <rect x="3" y="3" width="10" height="10" rx="1" />
+      <rect x="11" y="11" width="10" height="10" rx="1" />
+    </>
+  ),
+  style: (
+    <>
+      <path d="M4 7h8" />
+      <path d="M16 7h4" />
+      <circle cx="14" cy="7" r="2" />
+      <path d="M4 17h3" />
+      <path d="M11 17h9" />
+      <circle cx="9" cy="17" r="2" />
+    </>
+  ),
+  text: (
+    <>
+      <path d="M5 5h14" />
+      <path d="M12 5v14" />
+    </>
+  ),
+  images: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.5" />
+      <path d="m3 16 5-5 4 4 3-3 6 6" />
+    </>
+  ),
+  import: (
+    <>
+      <path d="M12 4v11" />
+      <path d="m7 12 5 5 5-5" />
+      <path d="M4 20h16" />
+    </>
+  ),
+  library: (
+    <>
+      <rect x="3" y="4" width="12" height="16" rx="2" />
+      <path d="M7 4v16" />
+      <path d="M17 7h4" />
+      <path d="M17 12h4" />
+      <path d="M17 17h4" />
     </>
   ),
 };

@@ -9,13 +9,29 @@ import {
 } from "react";
 import { PENS, PEN_BY_ID } from "../engine/pens";
 import { SHAPES, SHAPE_BY_ID, isShape } from "../engine/shapes";
+import { unionBounds } from "../engine/geometry";
+import { remapStrokes } from "../engine/import";
 import { toPng, toSvg } from "../engine/serialize";
 import type { TooltipOptions } from "./Tooltip";
 import type { Board, PenId, ShapeKind, Stroke, ToolId } from "../engine/types";
 import { useDrawing } from "../hooks/use-drawing";
-import { DrawSurface, type Tool } from "./DrawSurface";
+import { useClipboard } from "../hooks/use-clipboard";
+import {
+  useSelection,
+  type AlignHow,
+  type ReorderHow,
+  type StylePatch,
+} from "../hooks/use-selection";
+import {
+  DrawSurface,
+  readImageFile,
+  ZOOM_MAX,
+  ZOOM_MIN,
+  type Tool,
+  type View,
+} from "./DrawSurface";
 import { Toolbar, type ToolState } from "./Toolbar";
-import { ShapeIcon, ToolIcon } from "./ToolIcon";
+import { ShapeIcon, ToolGlyph, ToolIcon } from "./ToolIcon";
 import css from "./Draw.module.css";
 import "./tokens.css";
 
@@ -31,6 +47,10 @@ export type DrawControls = {
   opacity?: boolean;
   undo?: boolean;
   clear?: boolean;
+  /** The select tool; it and the text tool default on. */
+  select?: boolean;
+  /** The text tool. */
+  text?: boolean;
   /**
    * The swatch that opens the hex field and the spectrum.
    *
@@ -80,6 +100,36 @@ export type DrawHandle = {
   selectTool: (id: ToolId) => void;
   /** The surface size the drawing is being made at. */
   getSize: () => Board;
+  /** The elements in hand, by id. */
+  getSelection: () => number[];
+  /** Take the elements in hand. */
+  setSelection: (ids: number[]) => void;
+  /** The part of the board in view. */
+  getView: () => View;
+  /** Zoom by a factor about the centre of the view. */
+  zoomBy: (factor: number) => void;
+  /** Back to the board's own scale, at its origin. */
+  zoomReset: () => void;
+  /** Bring everything that has been drawn into view. */
+  zoomFit: () => void;
+  /** Restyle the elements in hand as one undoable step. */
+  styleSelection: (patch: StylePatch) => void;
+  /** Align the elements in hand to an edge of their union box. */
+  alignSelection: (how: AlignHow) => void;
+  /** Space the elements in hand evenly; needs at least three. */
+  distributeSelection: (axis: "h" | "v") => void;
+  /** Re-order the elements in hand within the stack. */
+  reorderSelection: (how: ReorderHow) => void;
+  /** Group the elements in hand, or break them out of their groups. */
+  groupSelection: () => void;
+  ungroupSelection: () => void;
+  /** Freeze the elements in hand in place, or set them loose again. */
+  toggleLockSelection: () => void;
+  /** Read an image file in at the centre of the view, selected on arrival. */
+  addImage: (file: File) => void;
+  /** Bring strokes in from outside (a saved drawing, the library), ids and
+      groups made fresh, centred on the view and selected. */
+  addStrokes: (strokes: Stroke[]) => void;
 };
 
 /**
@@ -106,6 +156,10 @@ export type DrawProps = {
   onChange?: (strokes: Stroke[]) => void;
   /** Fired with the tool state whenever the tool in hand changes. */
   onToolChange?: (tool: ToolState) => void;
+  /** Fired with the elements in hand whenever the selection changes. */
+  onSelectionChange?: (ids: number[]) => void;
+  /** Fired with the part of the board in view whenever it changes. */
+  onViewChange?: (view: View) => void;
   /** Turn the built-in chrome off and drive it yourself. */
   chrome?: boolean;
   /**
@@ -169,6 +223,8 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
     initialStrokes,
     onChange,
     onToolChange,
+    onSelectionChange,
+    onViewChange,
     chrome = true,
     motion,
     placement = "bottom",
@@ -199,6 +255,54 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
   const root = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(startMinimized);
   const [measured, setMeasured] = useState<Board>({ w: 1600, h: 1000 });
+
+  /** The elements in hand, and everything that can be done to them. */
+  const {
+    selection,
+    setSelection,
+    styleSelection,
+    deleteSelection,
+    duplicateSelection,
+    groupSelection,
+    ungroupSelection,
+    toggleLockSelection,
+    selectAll,
+    nudge,
+    alignSelection,
+    distributeSelection,
+    reorderSelection,
+  } = useSelection(drawing);
+
+  /** The part of the board in view. */
+  const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
+
+  // Report the selection and the view, like the strokes and the tool.
+  const reportedSelection = useRef(onSelectionChange);
+  reportedSelection.current = onSelectionChange;
+  const reportedView = useRef(onViewChange);
+  reportedView.current = onViewChange;
+
+  /** Clipboard events land only while the surface has the focus. */
+  const inScope = useCallback(() => {
+    const el = root.current;
+    if (!el) return false;
+    const a = document.activeElement;
+    return el.contains(a) || a === document.body || a === el;
+  }, []);
+
+  useClipboard(drawing, {
+    getSelection: () => selection,
+    viewCentre: () => {
+      const v = view;
+      return {
+        x: v.x + surfaceBoard.w / v.k / 2,
+        y: v.y + surfaceBoard.h / v.k / 2,
+      };
+    },
+    inScope,
+    onPasted: setSelection,
+    board: () => ({ w: surfaceBoard.w, h: surfaceBoard.h, paint }),
+  });
 
   /** The ink to start with. */
   const startingInk = theme === "dark" ? "#f2f1ef" : "#111111";
@@ -276,7 +380,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
    * when a tool is picked up again. A pen that's never been touched isn't in
    * here at all, so it still opens at its own default.
    */
-  const tuned = useRef<Partial<Record<PenId, { size: number; opacity: number }>>>(
+  const tuned = useRef<Partial<Record<ToolId, { size: number; opacity: number }>>>(
     {},
   );
   /** The colour shared by every pen that doesn't keep one of its own. */
@@ -316,6 +420,18 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
   const select = useCallback(
     (id: ToolId) => {
       if (id === "eraser") return setTool((t) => ({ ...t, active: "eraser" }));
+      // The selection tools have no implements to tune; the text tool opens
+      // at the size it was last used in, a usable 24 the first time.
+      if (id === "select" || id === "text") {
+        const last = tuned.current[id];
+        return setTool((t) => ({
+          ...t,
+          active: id,
+          size: id === "text" ? (last?.size ?? 24) : t.size,
+          opacity: last?.opacity ?? t.opacity,
+          color: id === "text" ? inkFor("pen") : t.color,
+        }));
+      }
       // A shape has no settings of its own and no per-tool memory: it always
       // opens at its default width in the current ink.
       if (isShape(id)) {
@@ -359,7 +475,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
             (inkMode === "auto" &&
               !chosen.current &&
               !isShape(t.active) &&
-              Boolean(PEN_BY_ID[t.active].defaultColor));
+              Boolean(PEN_BY_ID[t.active as PenId]?.defaultColor));
           if (own)
             setInks((m) => ({ ...m, [t.active as PenId]: p.color as string }));
           else setInk(p.color);
@@ -444,36 +560,128 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
       clear: drawing.clear,
       selectTool: select,
       getSize: () => surfaceBoard,
+      getSelection: () => [...selection],
+      setSelection,
+      getView: () => ({ ...view }),
+      zoomBy: (factor) => {
+        const v = view;
+        const k = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v.k * factor));
+        if (k === v.k) return;
+        const cx = v.x + surfaceBoard.w / v.k / 2;
+        const cy = v.y + surfaceBoard.h / v.k / 2;
+        setView({ x: cx - surfaceBoard.w / k / 2, y: cy - surfaceBoard.h / k / 2, k });
+      },
+      zoomReset: () => setView({ x: 0, y: 0, k: 1 }),
+      zoomFit: () => {
+        const b = unionBounds(drawing.strokes);
+        const pad = 60;
+        const w = b.w + pad * 2;
+        const h = b.h + pad * 2;
+        if (!(w > 0 && h > 0)) return setView({ x: 0, y: 0, k: 1 });
+        const k = Math.min(
+          ZOOM_MAX,
+          Math.max(ZOOM_MIN, Math.min(surfaceBoard.w / w, surfaceBoard.h / h)),
+        );
+        setView({
+          x: b.x - pad + (surfaceBoard.w / k - w) / 2,
+          y: b.y - pad + (surfaceBoard.h / k - h) / 2,
+          k,
+        });
+      },
+      styleSelection,
+      alignSelection,
+      distributeSelection,
+      reorderSelection,
+      groupSelection,
+      ungroupSelection,
+      toggleLockSelection,
+      addImage: (file) => {
+        const v = view;
+        readImageFile(
+          file,
+          {
+            x: v.x + surfaceBoard.w / v.k / 2,
+            y: v.y + surfaceBoard.h / v.k / 2,
+          },
+          drawing,
+          (id) => setSelection([id]),
+        );
+      },
+      addStrokes: (strokes) => {
+        const v = view;
+        const added = remapStrokes(
+          strokes,
+          {
+            x: v.x + surfaceBoard.w / v.k / 2,
+            y: v.y + surfaceBoard.h / v.k / 2,
+          },
+        );
+        drawing.commit([...drawing.strokes, ...added]);
+        setSelection(added.map((s) => s.id));
+      },
     };
-  }, [drawing, surfaceBoard, background, select]);
+  }, [
+    drawing,
+    surfaceBoard,
+    background,
+    select,
+    view,
+    selection,
+    setSelection,
+    styleSelection,
+    alignSelection,
+    distributeSelection,
+    reorderSelection,
+    groupSelection,
+    ungroupSelection,
+    toggleLockSelection,
+  ]);
 
   const surfaceTool: Tool = useMemo(
     () =>
       tool.active === "eraser"
         ? { kind: "eraser", size: tool.eraserSize }
-        : isShape(tool.active)
-          ? {
-              kind: tool.active,
-              color: tool.color,
-              size: tool.size,
-              opacity: tool.opacity,
-            }
-          : {
-              kind: "pen",
-              pen: tool.active,
-              color: tool.color,
-              size: tool.size,
-              opacity: tool.opacity,
-            },
+        : tool.active === "select"
+          ? { kind: "select" }
+          : tool.active === "text"
+            ? {
+                kind: "text",
+                color: tool.color,
+                size: tool.size,
+                opacity: tool.opacity,
+              }
+            : isShape(tool.active)
+              ? {
+                  kind: tool.active,
+                  color: tool.color,
+                  size: tool.size,
+                  opacity: tool.opacity,
+                }
+              : {
+                  kind: "pen",
+                  pen: tool.active,
+                  color: tool.color,
+                  size: tool.size,
+                  opacity: tool.opacity,
+                },
     [tool],
   );
 
   // Shortcuts are scoped to focus-within, so a drawing embedded in a page
   // never swallows the host's typing.
+  const showSelect = controls?.select ?? true;
+  const showText = controls?.text ?? true;
   useEffect(() => {
     const el = root.current;
     if (!el || !shortcuts) return;
     const onKey = (e: KeyboardEvent) => {
+      // While a text mark is being typed (or the host's own fields are
+      // focused) the keys belong to the text, not to the tools.
+      if (
+        (e.target as HTMLElement)?.closest?.("input,textarea,[contenteditable]")
+      ) {
+        return;
+      }
       if (
         !el.contains(document.activeElement) &&
         document.activeElement !== document.body
@@ -490,7 +698,36 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
         e.preventDefault();
         return drawing.redo();
       }
+      if (meta && k === "d") {
+        e.preventDefault();
+        return duplicateSelection();
+      }
+      if (meta && k === "a") {
+        e.preventDefault();
+        return selectAll();
+      }
+      if (meta && k === "g") {
+        e.preventDefault();
+        return e.shiftKey ? ungroupSelection() : groupSelection();
+      }
+      if (meta && k === "l" && e.shiftKey) {
+        e.preventDefault();
+        return toggleLockSelection();
+      }
       if (meta) return;
+      if (k === "v" && showSelect) return select("select");
+      if (k === "t" && showText) return select("text");
+      if (k === "escape") return setSelection([]);
+      if (k === "delete" || k === "backspace") return deleteSelection();
+      if (k.startsWith("arrow")) {
+        if (!selection.length) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        if (k === "arrowleft") return nudge(-step, 0);
+        if (k === "arrowright") return nudge(step, 0);
+        if (k === "arrowup") return nudge(0, -step);
+        return nudge(0, step);
+      }
       if (k === "e" && eraser) return select("eraser");
       if (k === "[") return nudgeSize(-1);
       if (k === "]") return nudgeSize(1);
@@ -501,7 +738,25 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [drawing, select, pens, eraser, shortcuts, nudgeSize]);
+  }, [
+    drawing,
+    select,
+    pens,
+    eraser,
+    shortcuts,
+    nudgeSize,
+    showSelect,
+    showText,
+    selection,
+    setSelection,
+    deleteSelection,
+    duplicateSelection,
+    groupSelection,
+    ungroupSelection,
+    toggleLockSelection,
+    selectAll,
+    nudge,
+  ]);
 
   /*
     Dragging the toolbar.
@@ -733,6 +988,16 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
         board={surfaceBoard}
         background={background}
         tool={surfaceTool}
+        view={view}
+        onViewChange={(v) => {
+          setView(v);
+          reportedView.current?.(v);
+        }}
+        selection={selection}
+        onSelection={(ids) => {
+          setSelection(ids);
+          reportedSelection.current?.(ids);
+        }}
         disabled={chrome && collapsed && !drawWhenMinimized}
         className={css.surface}
       />
@@ -800,6 +1065,8 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
             icon={
               isShape(tool.active) ? (
                 <ShapeIcon kind={tool.active} color={tool.color} size={42} />
+              ) : tool.active === "select" || tool.active === "text" ? (
+                <ToolGlyph id={tool.active} color={tool.color} size={42} />
               ) : (
                 <ToolIcon
                   id={tool.active === "eraser" ? "eraser" : tool.active}

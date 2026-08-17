@@ -1,6 +1,14 @@
-import { dotRadius, eraseLayers, figureMarkup, polylinePath, strokePath } from "./geometry";
+import {
+  dashArray,
+  dotRadius,
+  eraseLayers,
+  figureMarkup,
+  lineHeight,
+  polylinePath,
+  strokePath,
+} from "./geometry";
 import { PEN_BY_ID } from "./pens";
-import type { Stroke } from "./types";
+import type { Box, FigureFill, Stroke } from "./types";
 
 /** Escape a value destined for an XML attribute. */
 export function esc(value: string): string {
@@ -9,6 +17,75 @@ export function esc(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** The text of one mark, with its rotation applied. */
+function rotated(group: string, stroke: Stroke): string {
+  if (!stroke.rotate) return group;
+  const [cx, cy] = textCentre(stroke);
+  return `<g transform="rotate(${stroke.rotate} ${cx} ${cy})">${group}</g>`;
+}
+
+function textCentre(stroke: Stroke): [number, number] {
+  let x: number;
+  let y: number;
+  let w: number;
+  let h: number;
+  if (stroke.figure) {
+    x = stroke.figure.x;
+    y = stroke.figure.y;
+    w = stroke.figure.w;
+    h = stroke.figure.h;
+  } else if (stroke.image) {
+    x = stroke.points[0]?.[0] ?? 0;
+    y = stroke.points[0]?.[1] ?? 0;
+    w = stroke.image.w;
+    h = stroke.image.h;
+  } else if (stroke.text) {
+    x = stroke.points[0]?.[0] ?? 0;
+    y = stroke.points[0]?.[1] ?? 0;
+    w = stroke.text.w;
+    h = stroke.text.h;
+  } else {
+    x = y = 0;
+    w = h = 0;
+  }
+  return [x + w / 2, y + h / 2];
+}
+
+/** A committed image, embedded as its data URL. */
+function imageMarkup(stroke: Stroke): string {
+  const [x, y] = stroke.points[0] ?? [0, 0];
+  return rotated(
+    `<g opacity="${stroke.opacity}"><image x="${x}" y="${y}" width="${stroke.image?.w}"` +
+      ` height="${stroke.image?.h}" href="${esc(stroke.image?.data ?? "")}"` +
+      ` preserveAspectRatio="none"/></g>`,
+    stroke,
+  );
+}
+
+/** A text mark, one line per tspan. */
+function textMarkup(stroke: Stroke): string {
+  const t = stroke.text;
+  if (!t) return "";
+  const [x, y] = stroke.points[0] ?? [0, 0];
+  const lineH = lineHeight(t.size);
+  const lines = t.content.split("\n");
+  const common =
+    `x="${x}" font-family="${esc(t.font)}" font-size="${t.size}"` +
+    ` fill="${esc(stroke.color)}"` +
+    (t.bold ? ` font-weight="700"` : "") +
+    (t.italic ? ` font-style="italic"` : "");
+  const body = lines
+    .map(
+      (line, i) =>
+        `<tspan${i === 0 ? "" : ` dy="${lineH}"`} x="${x}">${esc(line)}</tspan>`,
+    )
+    .join("");
+  return rotated(
+    `<g opacity="${stroke.opacity}"><text ${common} y="${y + t.size * 0.85}">${body}</text></g>`,
+    stroke,
+  );
 }
 
 /**
@@ -20,14 +97,36 @@ function strokeMarkup(stroke: Stroke): string {
   // arrow's head filled in solid.
   if (stroke.figure) {
     const { d, head } = figureMarkup(stroke.figure, stroke.size);
-    return (
-      `<g opacity="${stroke.opacity}">` +
+    const dash = dashArray(stroke.figure.dash);
+    const raw = stroke.figure.fill as FigureFill | boolean | undefined;
+    const fill = raw === true ? "solid" : raw;
+    const hatch = (angle: number, id: string) =>
+      `<pattern id="${id}" width="8" height="8" patternUnits="userSpaceOnUse"` +
+      ` patternTransform="rotate(${angle})">` +
+      `<line x1="0" y1="0" x2="0" y2="8" stroke="${esc(stroke.color)}"` +
+      ` stroke-opacity="0.25" stroke-width="1.2"/></pattern>`;
+    const fillBody =
+      fill && d.endsWith("Z")
+        ? fill === "solid"
+          ? `<path d="${d}" fill="${esc(stroke.color)}" fill-opacity="${stroke.opacity}"/>`
+          : `<defs>${hatch(45, `h-${stroke.id}`)}${
+              fill === "cross-hatch" ? hatch(-45, `x-${stroke.id}`) : ""
+            }</defs>` +
+            `<path d="${d}" fill="url(#h-${stroke.id})"/>` +
+            (fill === "cross-hatch" ? `<path d="${d}" fill="url(#x-${stroke.id})"/>` : "")
+        : "";
+    const body =
+      fillBody +
       `<path d="${d}" stroke="${esc(stroke.color)}" stroke-width="${stroke.size}"` +
-      ` fill="none" stroke-linecap="round" stroke-linejoin="round"/>` +
-      (head ? `<path d="${head}" fill="${esc(stroke.color)}"/>` : "") +
-      `</g>`
-    );
+      ` fill="none" stroke-linecap="round" stroke-linejoin="round"` +
+      (dash ? ` stroke-dasharray="${dash}"` : "") +
+      `/>` +
+      (head ? `<path d="${head}" fill="${esc(stroke.color)}"/>` : "");
+    return rotated(`<g opacity="${stroke.opacity}">${body}</g>`, stroke);
   }
+
+  if (stroke.image) return imageMarkup(stroke);
+  if (stroke.text) return textMarkup(stroke);
 
   const style =
     PEN_BY_ID[stroke.pen].blend === "multiply"
@@ -42,11 +141,14 @@ function strokeMarkup(stroke: Stroke): string {
     true,
     stroke.shape,
   );
-  if (d) return `<path d="${d}" ${paint}/>`;
+  if (d) return rotated(`<path d="${d}" ${paint}/>`, stroke);
 
   if (stroke.points.length) {
     const [x, y] = stroke.points[0];
-    return `<circle cx="${x}" cy="${y}" r="${dotRadius(stroke.size)}" ${paint}/>`;
+    return rotated(
+      `<circle cx="${x}" cy="${y}" r="${dotRadius(stroke.size)}" ${paint}/>`,
+      stroke,
+    );
   }
   return "";
 }
@@ -60,14 +162,21 @@ function backgroundMarkup(
   return `<rect width="${width}" height="${height}" fill="${esc(background)}"/>`;
 }
 
-/** Serialize the board + strokes into a standalone, static SVG string. */
+/**
+ * Serialize a drawing into a standalone, static SVG string. A `bounds` crops
+ * the export to a region of the board, sized to fit it.
+ */
 export function toSvg(
   strokes: Stroke[],
   width: number,
   height: number,
   background: string | null,
+  bounds?: Box,
 ): string {
   const layers = eraseLayers(strokes);
+  const crop = bounds
+    ? { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h }
+    : { x: 0, y: 0, w: width, h: height };
 
   const body = layers
     .map((layer, i) => {
@@ -90,30 +199,34 @@ export function toSvg(
         .join("");
 
       return (
-        `<mask id="${id}" maskUnits="userSpaceOnUse" x="0" y="0" width="${width}" height="${height}">` +
-        `<rect width="${width}" height="${height}" fill="#fff"/>${cuts}</mask>` +
+        `<mask id="${id}" maskUnits="userSpaceOnUse" x="${crop.x}" y="${crop.y}"` +
+        ` width="${crop.w}" height="${crop.h}">` +
+        `<rect x="${crop.x}" y="${crop.y}" width="${crop.w}" height="${crop.h}" fill="#fff"/>` +
+        `${cuts}</mask>` +
         `<g mask="url(#${id})">${ink}</g>`
       );
     })
     .join("");
 
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
-    backgroundMarkup(background, width, height) +
-    body +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.max(1, Math.round(crop.w))}"` +
+    ` height="${Math.max(1, Math.round(crop.h))}" viewBox="${crop.x} ${crop.y} ${crop.w} ${crop.h}">` +
+    backgroundMarkup(background, crop.w, crop.h) +
+    `<g transform="translate(${-crop.x} ${-crop.y})">${body}</g>` +
     `</svg>`
   );
 }
 
-/** Rasterise the drawing to a PNG blob. */
+/** Rasterise a drawing to a PNG blob. */
 export async function toPng(
   strokes: Stroke[],
   width: number,
   height: number,
   background: string | null,
   scale = 2,
+  bounds?: Box,
 ): Promise<Blob> {
-  const svg = toSvg(strokes, width, height, background);
+  const svg = toSvg(strokes, width, height, background, bounds);
   // Encoded rather than base64'd so the markup survives any non-ASCII in it.
   const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 
@@ -128,8 +241,8 @@ export async function toPng(
   });
 
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(width * scale));
-  canvas.height = Math.max(1, Math.round(height * scale));
+  canvas.width = Math.max(1, Math.round((bounds?.w ?? width) * scale));
+  canvas.height = Math.max(1, Math.round((bounds?.h ?? height) * scale));
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get a 2D context");
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
