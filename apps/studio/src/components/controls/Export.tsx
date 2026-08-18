@@ -21,10 +21,10 @@ export function ExportControl({
     <Dropdown label="Export" icon={<CtrlIcon id="export" />}>
       {() => (
         <>
-          <Chip onClick={() => draw.current?.download("drawing", "svg", opts)}>
+          <Chip label="Export SVG" onClick={() => draw.current?.download("drawing", "svg", opts)}>
             .svg
           </Chip>
-          <Chip onClick={() => draw.current?.download("drawing", "png", opts)}>
+          <Chip label="Export PNG" onClick={() => draw.current?.download("drawing", "png", opts)}>
             .png
           </Chip>
           <label
@@ -97,6 +97,7 @@ export function ExportControl({
             selection only
           </label>
           <Chip
+            label="Export JSON"
             onClick={() => {
               const blob = new Blob([json()], {
                 type: "application/json",
@@ -111,6 +112,7 @@ export function ExportControl({
             .json
           </Chip>
           <Chip
+            label="Copy SVG to the clipboard"
             onClick={() => {
               const svg = draw.current?.toSvg(opts) ?? "";
               // eslint-disable-next-line no-console
@@ -121,6 +123,7 @@ export function ExportControl({
             copy svg
           </Chip>
           <Chip
+            label="Copy JSON to the clipboard"
             onClick={() => {
               navigator.clipboard?.writeText(json());
             }}
