@@ -13,7 +13,7 @@ import { unionBounds } from "../engine/geometry";
 import { remapStrokes } from "../engine/import";
 import { toPng, toSvg } from "../engine/serialize";
 import type { TooltipOptions } from "./Tooltip";
-import type { Board, PenId, ShapeKind, Stroke, ToolId } from "../engine/types";
+import type { Board, Box, PenId, ShapeKind, Stroke, ToolId } from "../engine/types";
 import { useDrawing } from "../hooks/use-drawing";
 import { useClipboard } from "../hooks/use-clipboard";
 import {
@@ -34,6 +34,10 @@ import { Toolbar, type ToolState } from "./Toolbar";
 import { ShapeIcon, ToolGlyph, ToolIcon } from "./ToolIcon";
 import css from "./Draw.module.css";
 import "./tokens.css";
+
+/** Where the autosave lives: one slot per page, so several drawings on the
+    same host never fight over the drawing. */
+const AUTOSAVE_KEY = "pencilart:autosave:v1";
 
 /** Every shape tool, in tray order. */
 const ALL_SHAPES = SHAPES.map((s) => s.kind);
@@ -75,17 +79,26 @@ export type InkMode =
    */
   | "auto";
 
+/** How an export may be shaped. `scale` multiplies pixels on the PNG only;
+    `transparent` drops the page background; `selection` exports just the
+    elements in hand, cropped to them. */
+export type ExportOptions = {
+  scale?: number;
+  transparent?: boolean;
+  selection?: boolean;
+};
+
 /** What `Draw` exposes to the code that mounts it. */
 export type DrawHandle = {
   /** The drawing as a standalone SVG string. */
-  toSvg: () => string;
+  toSvg: (opts?: ExportOptions) => string;
   /** The drawing rasterised. `scale` is a device-pixel multiplier. */
-  toPng: (scale?: number) => Promise<Blob>;
+  toPng: (opts?: ExportOptions) => Promise<Blob>;
   /** Save straight to a file. Extension picked from the format. */
   download: (
     name?: string,
     format?: "svg" | "png",
-    scale?: number,
+    opts?: ExportOptions,
   ) => Promise<void>;
   getStrokes: () => Stroke[];
   setStrokes: (strokes: Stroke[]) => void;
@@ -112,6 +125,8 @@ export type DrawHandle = {
   zoomReset: () => void;
   /** Bring everything that has been drawn into view. */
   zoomFit: () => void;
+  /** Bring the elements in hand into view. */
+  zoomToSelection: () => void;
   /** Restyle the elements in hand as one undoable step. */
   styleSelection: (patch: StylePatch) => void;
   /** Align the elements in hand to an edge of their union box. */
@@ -153,6 +168,9 @@ export type DrawProps = {
   background?: string;
   /** Strokes to start from. */
   initialStrokes?: Stroke[];
+  /** Keep the drawing in localStorage, and pick it up again on the next
+   *  visit. Only applies to a host-owned board (no `initialStrokes`). */
+  autosave?: boolean;
   onChange?: (strokes: Stroke[]) => void;
   /** Fired with the tool state whenever the tool in hand changes. */
   onToolChange?: (tool: ToolState) => void;
@@ -211,6 +229,8 @@ export type DrawProps = {
   ink?: InkMode;
   /** How much the toolbar reads as a physical object. */
   depth?: "flat" | "soft" | "regular" | "strong";
+  /** Draw a GRID-unit lattice under the ink, and snap draws and drags to it. */
+  grid?: boolean;
   className?: string;
   style?: React.CSSProperties;
 };
@@ -246,15 +266,82 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
     draggable = false,
     ink: inkMode = "auto",
     depth = "regular",
+    grid = false,
+    autosave = false,
     className,
     style,
   },
   ref,
 ) {
-  const drawing = useDrawing(initialStrokes);
+  // A host-owned board (initialStrokes) is the host's business: autosave only
+  // runs on the blank page, and picks up where the last visit left off.
+  const autosaveHere = autosave && !initialStrokes;
+  const [booted] = useState<Stroke[]>(() => {
+    if (!autosaveHere) return [];
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as { strokes?: Stroke[] };
+      return Array.isArray(parsed.strokes) ? parsed.strokes : [];
+    } catch {
+      return [];
+    }
+  });
+  const drawing = useDrawing(initialStrokes ?? (autosaveHere ? booted : []));
+  useEffect(() => {
+    if (!autosaveHere) return;
+    try {
+      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ strokes: drawing.strokes }));
+    } catch {
+      /* a full or private store is fine to ignore */
+    }
+  }, [autosaveHere, drawing.strokes]);
   const root = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(startMinimized);
   const [measured, setMeasured] = useState<Board>({ w: 1600, h: 1000 });
+
+  /** The right-click menu: where it sits, or nothing while it's closed. */
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  /** The shortcut help panel: open while `?` says so. */
+  const [help, setHelp] = useState(false);
+
+  // Help goes away on Escape or on an outside press, like the menu.
+  useEffect(() => {
+    if (!help) return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest?.("[data-help-panel]")) return;
+      setHelp(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setHelp(false);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [help]);
+
+  // The menu goes away on an outside press, on Escape, and after an action.
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: PointerEvent) => {
+      if ((e.target as HTMLElement)?.closest?.("[data-ctx-menu]")) return;
+      setMenu(null);
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("pointerdown", close, true);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("pointerdown", close, true);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [menu]);
 
   /** The elements in hand, and everything that can be done to them. */
   const {
@@ -337,6 +424,31 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
   }, []);
 
   const surfaceBoard = board ?? measured;
+
+  /** Bring a box into view, padded, centred, clamped to the zoom limits. */
+  const fitBounds = useCallback(
+    (b: Box, pad: number) => {
+      const w = b.w + pad * 2;
+      const h = b.h + pad * 2;
+      if (!(w > 0 && h > 0)) {
+        setView({ x: 0, y: 0, k: 1 });
+        reportedView.current?.({ x: 0, y: 0, k: 1 });
+        return;
+      }
+      const k = Math.min(
+        ZOOM_MAX,
+        Math.max(ZOOM_MIN, Math.min(surfaceBoard.w / w, surfaceBoard.h / h)),
+      );
+      const next = {
+        x: b.x - pad + (surfaceBoard.w / k - w) / 2,
+        y: b.y - pad + (surfaceBoard.h / k - h) / 2,
+        k,
+      };
+      setView(next);
+      reportedView.current?.(next);
+    },
+    [surfaceBoard],
+  );
 
   /** The pens on offer, in the order asked for. */
   const pens = useMemo(
@@ -525,23 +637,48 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
   }, []);
 
   useImperativeHandle(ref, (): DrawHandle => {
-    const svg = () =>
-      toSvg(drawing.strokes, surfaceBoard.w, surfaceBoard.h, paint);
+    /** What an export draws: everything or the elements in hand, cropped to
+        them, on the page background unless transparency was asked for. */
+    const exportSet = (opts?: ExportOptions) => {
+      const strokes = opts?.selection
+        ? drawing.strokes.filter((s) => selection.includes(s.id))
+        : drawing.strokes;
+      const bounds = opts?.selection ? unionBounds(strokes) : undefined;
+      const background = opts?.transparent ? "transparent" : paint;
+      return { strokes, bounds, background };
+    };
     return {
-      toSvg: svg,
-      toPng: (scale = 2) =>
-        toPng(drawing.strokes, surfaceBoard.w, surfaceBoard.h, paint, scale),
-      async download(name = "drawing", format = "svg", scale = 2) {
+      toSvg: (opts) => {
+        const { strokes, bounds, background } = exportSet(opts);
+        return toSvg(strokes, surfaceBoard.w, surfaceBoard.h, background, bounds);
+      },
+      toPng: async (opts) => {
+        const { strokes, bounds, background } = exportSet(opts);
+        return toPng(
+          strokes,
+          surfaceBoard.w,
+          surfaceBoard.h,
+          background,
+          opts?.scale ?? 2,
+          bounds,
+        );
+      },
+      async download(name = "drawing", format = "svg", opts) {
+        const { strokes, bounds, background } = exportSet(opts);
         const blob =
           format === "png"
             ? await toPng(
-                drawing.strokes,
+                strokes,
                 surfaceBoard.w,
                 surfaceBoard.h,
-                paint,
-                scale,
+                background,
+                opts?.scale ?? 2,
+                bounds,
               )
-            : new Blob([svg()], { type: "image/svg+xml" });
+            : new Blob(
+                [toSvg(strokes, surfaceBoard.w, surfaceBoard.h, background, bounds)],
+                { type: "image/svg+xml" },
+              );
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -584,26 +721,12 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
         reportedView.current?.({ x: 0, y: 0, k: 1 });
       },
       zoomFit: () => {
-        const b = unionBounds(drawing.strokes);
-        const pad = 60;
-        const w = b.w + pad * 2;
-        const h = b.h + pad * 2;
-        if (!(w > 0 && h > 0)) {
-          setView({ x: 0, y: 0, k: 1 });
-          reportedView.current?.({ x: 0, y: 0, k: 1 });
-          return;
-        }
-        const k = Math.min(
-          ZOOM_MAX,
-          Math.max(ZOOM_MIN, Math.min(surfaceBoard.w / w, surfaceBoard.h / h)),
-        );
-        const next = {
-          x: b.x - pad + (surfaceBoard.w / k - w) / 2,
-          y: b.y - pad + (surfaceBoard.h / k - h) / 2,
-          k,
-        };
-        setView(next);
-        reportedView.current?.(next);
+        fitBounds(unionBounds(drawing.strokes), 60);
+      },
+      zoomToSelection: () => {
+        const picked = drawing.strokes.filter((s) => selection.includes(s.id));
+        if (!picked.length) return;
+        fitBounds(unionBounds(picked), 40);
       },
       styleSelection,
       alignSelection,
@@ -645,6 +768,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
     view,
     selection,
     setSelection,
+    fitBounds,
     styleSelection,
     alignSelection,
     distributeSelection,
@@ -732,6 +856,20 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
         return toggleLockSelection();
       }
       if (meta) return;
+      // Shift+1 fits the whole drawing; Shift+2 brings the elements in hand
+      // into view; ? is the help panel.
+      if (e.shiftKey && k === "1") {
+        e.preventDefault();
+        fitBounds(unionBounds(drawing.strokes), 60);
+        return;
+      }
+      if (e.shiftKey && k === "2") {
+        e.preventDefault();
+        const picked = drawing.strokes.filter((s) => selection.includes(s.id));
+        if (picked.length) fitBounds(unionBounds(picked), 40);
+        return;
+      }
+      if (k === "?") return setHelp((h) => !h);
       if (k === "v" && showSelect) return select("select");
       if (k === "t" && showText) return select("text");
       if (k === "escape") return setSelection([]);
@@ -773,6 +911,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
     toggleLockSelection,
     selectAll,
     nudge,
+    fitBounds,
   ]);
 
   /*
@@ -989,6 +1128,224 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
     }
   }, [chrome, exitWith]);
 
+  const menuItem = (
+    label: string,
+    act: () => void,
+    disabled = false,
+    hint?: string,
+  ) => (
+    <button
+      key={label}
+      type="button"
+      disabled={disabled}
+      onClick={() => {
+        act();
+        setMenu(null);
+      }}
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 16,
+        width: "100%",
+        textAlign: "left",
+        padding: "5px 10px",
+        border: 0,
+        background: "transparent",
+        color: "inherit",
+        fontSize: 12,
+        borderRadius: 5,
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.4 : 1,
+        fontFamily: "inherit",
+      }}
+      onMouseEnter={(e) => {
+        if (!disabled) e.currentTarget.style.background = "#3a3a44";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+    >
+      <span>{label}</span>
+      {hint ? (
+        <span style={{ color: "#9a9aa5", fontSize: 11, alignSelf: "center" }}>
+          {hint}
+        </span>
+      ) : null}
+    </button>
+  );
+
+  const menuSep = (key: string) => (
+    <div key={key} style={{ height: 1, background: "#3b3b44", margin: "4px 6px" }} />
+  );
+
+  // A paste from the menu re-enters through the same door as the keyboard:
+  // the clipboard's text rides in on the event's DataTransfer.
+  const firePaste = () => {
+    void (async () => {
+      const dt = new DataTransfer();
+      try {
+        const t = await navigator.clipboard.readText();
+        if (t) dt.setData("text/plain", t);
+      } catch {
+        /* the clipboard is locked: paste whatever made it into the transfer */
+      }
+      window.dispatchEvent(
+        new ClipboardEvent("paste", { clipboardData: dt, cancelable: true, bubbles: true }),
+      );
+    })();
+  };
+
+  const anyGroup = selection.some((id) =>
+    drawing.strokes.some((s) => s.id === id && s.group !== undefined),
+  );
+  const anyLocked = selection.some((id) =>
+    drawing.strokes.some((s) => s.id === id && s.locked),
+  );
+  const has = selection.length > 0;
+
+  const menuNode = menu ? (
+    <div
+      data-ctx-menu
+      style={{
+        position: "fixed",
+        left: Math.min(menu.x, window.innerWidth - 190),
+        top: Math.min(menu.y, window.innerHeight - 430),
+        zIndex: 9999,
+        background: "#26262c",
+        border: "1px solid #3b3b44",
+        borderRadius: 8,
+        padding: 4,
+        boxShadow: "0 8px 30px rgba(0,0,0,.35)",
+        color: "#f0f0f2",
+        fontFamily: "system-ui, sans-serif",
+        fontSize: 12,
+        minWidth: 170,
+        userSelect: "none",
+      }}
+    >
+      {menuItem("Copy", () => void document.execCommand("copy"), !has, "Ctrl+C")}
+      {menuItem("Cut", () => void document.execCommand("cut"), !has, "Ctrl+X")}
+      {menuItem("Paste", firePaste, false, "Ctrl+V")}
+      {menuSep("s1")}
+      {menuItem("Duplicate", duplicateSelection, !has, "Ctrl+D")}
+      {menuItem("Delete", deleteSelection, !has, "Del")}
+      {menuItem("Select all", selectAll, false, "Ctrl+A")}
+      {menuSep("s2")}
+      {anyGroup
+        ? menuItem("Ungroup", ungroupSelection, !has, "Ctrl+Shift+G")
+        : menuItem("Group", groupSelection, selection.length < 2, "Ctrl+G")}
+      {anyLocked
+        ? menuItem("Unlock", toggleLockSelection, !has)
+        : menuItem("Lock", toggleLockSelection, !has, "Ctrl+Shift+L")}
+      {menuSep("s3")}
+      {menuItem("Bring to front", () => reorderSelection("front"), !has)}
+      {menuItem("Send to back", () => reorderSelection("back"), !has)}
+      {menuSep("s4")}
+      {menuItem("Align left", () => alignSelection("left"), selection.length < 2)}
+      {menuItem("Align centre", () => alignSelection("center"), selection.length < 2)}
+      {menuItem("Align right", () => alignSelection("right"), selection.length < 2)}
+      {menuItem("Align top", () => alignSelection("top"), selection.length < 2)}
+      {menuItem("Align middle", () => alignSelection("middle"), selection.length < 2)}
+      {menuItem("Align bottom", () => alignSelection("bottom"), selection.length < 2)}
+    </div>
+  ) : null;
+
+  /** The shortcut help panel, opened by ?. */
+  const helpNode = help ? (
+    <div
+      data-help-panel
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(0,0,0,.45)",
+        fontFamily: "system-ui, sans-serif",
+      }}
+    >
+      <div
+        data-help-card
+        style={{
+          width: 560,
+          maxHeight: "78vh",
+          overflow: "auto",
+          background: "#26262c",
+          border: "1px solid #3b3b44",
+          borderRadius: 10,
+          padding: "18px 20px",
+          boxShadow: "0 12px 40px rgba(0,0,0,.45)",
+          color: "#f0f0f2",
+          fontSize: 13,
+          userSelect: "none",
+        }}
+      >
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: 15,
+            marginBottom: 12,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span>Keyboard shortcuts</span>
+          <span style={{ opacity: 0.55, fontWeight: 400, fontSize: 12 }}>
+            press ? to close
+          </span>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <tbody>
+            {[
+              ["Undo", "Ctrl+Z"],
+              ["Redo", "Ctrl+Shift+Z / Ctrl+Y"],
+              ["Select all", "Ctrl+A"],
+              ["Duplicate", "Ctrl+D"],
+              ["Group", "Ctrl+G"],
+              ["Ungroup", "Ctrl+Shift+G"],
+              ["Lock / unlock", "Ctrl+Shift+L"],
+              ["Delete", "Del / Backspace"],
+              ["Nudge", "Arrows"],
+              ["Nudge ×10", "Shift+Arrows"],
+              ["Zoom to selection", "Shift+2"],
+              ["Fit to view", "Shift+1"],
+              ["Help", "?"],
+              ...PENS.filter((p) => p.key).map(
+                (p) => [p.name, p.key.toUpperCase()] as const,
+              ),
+              ...SHAPES.map((s) => [s.name, s.key.toUpperCase()] as const),
+              ["Eraser", "E"],
+              ["Select", "V"],
+              ["Text", "T"],
+              ["Thinner", "["],
+              ["Thicker", "]"],
+            ].map(([what, key]) => (
+              <tr key={what}>
+                <td style={{ padding: "4px 8px 4px 0", opacity: 0.8 }}>{what}</td>
+                <td style={{ padding: "4px 0", textAlign: "right" }}>
+                  <kbd
+                    style={{
+                      background: "rgba(255,255,255,.08)",
+                      border: "1px solid rgba(255,255,255,.18)",
+                      borderRadius: 4,
+                      padding: "1px 6px",
+                      fontSize: 11,
+                      fontFamily: "ui-monospace, monospace",
+                    }}
+                  >
+                    {key}
+                  </kbd>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div
       ref={root}
@@ -1006,6 +1363,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
         background={background}
         tool={surfaceTool}
         view={view}
+        grid={grid}
         onViewChange={(v) => {
           setView(v);
           reportedView.current?.(v);
@@ -1015,6 +1373,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
           setSelection(ids);
           reportedSelection.current?.(ids);
         }}
+        onContextMenu={(e, _p) => setMenu({ x: e.clientX, y: e.clientY })}
         disabled={chrome && collapsed && !drawWhenMinimized}
         className={css.surface}
       />
@@ -1123,6 +1482,9 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
           />
         </div>
       )}
+
+      {menuNode}
+      {helpNode}
     </div>
   );
 });

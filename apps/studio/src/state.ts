@@ -13,6 +13,7 @@ export type DebugState = {
   look: "classic" | "studio";
   gauge: boolean;
   shortcuts: boolean;
+  grid: boolean;
   ink: InkMode;
   chrome: boolean;
   motion: "rise" | "none";
@@ -44,6 +45,7 @@ export const defaults: DebugState = {
   look: "classic",
   gauge: false,
   shortcuts: true,
+  grid: false,
   ink: "auto",
   chrome: true,
   motion: "rise",

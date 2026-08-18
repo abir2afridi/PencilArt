@@ -20,7 +20,8 @@ export type ShapeKind =
   | "diamond"
   | "line"
   | "arrow"
-  | "double-arrow";
+  | "double-arrow"
+  | "frame";
 
 /** Anything the toolbar can be holding. */
 export type ToolId = PenId | "eraser" | "select" | "text" | ShapeKind;
@@ -93,8 +94,32 @@ export type Shape = {
   h: number;
   /** Paint the closed path. `true` is the plain wash; the others are hatched. */
   fill?: FigureFill;
+  /** The fill's own colour; absent, the stroke colour is used. */
+  fillColor?: string;
   /** The shaft's line style; the arrow's head stays solid. */
   dash?: FigureDash;
+  /** How long the arrow head is; absent, it scales with the stroke. */
+  headSize?: number;
+  /** Whether the arrow has a head on its start anchor. */
+  headStart?: boolean;
+  /** Whether the arrow has a head on its end anchor. */
+  headEnd?: boolean;
+  /** A quadratic-Bézier control point for a line or arrow shaft, in board
+   *  coordinates. Absent, the shaft is straight. */
+  bend?: { x: number; y: number };
+  /** Connector links: the ids of elements an arrow's anchors stick to. The
+   *  offsets are where each anchor sits relative to its element's box, so
+   *  the arrow follows the element as it moves. */
+  bound?: {
+    start?: number;
+    end?: number;
+    sx?: number;
+    sy?: number;
+    ex?: number;
+    ey?: number;
+  };
+  /** A human-friendly name for a frame, shown on its top-left corner. */
+  frameName?: string;
 };
 
 /** The shaft's line style. */
@@ -113,6 +138,10 @@ export type TextPart = {
   font: string;
   bold?: boolean;
   italic?: boolean;
+  /** How the lines sit within the mark's box. */
+  align?: "left" | "center" | "right";
+  /** A wash behind the text; absent, the text stands on its own. */
+  background?: string;
 };
 
 /** One committed mark. */
@@ -146,6 +175,8 @@ export type Stroke = {
    * untouched, exactly as it would be on paper.
    */
   erase?: boolean;
+  /** The frame this element belongs to, by the frame stroke's id. */
+  frameId?: number;
 };
 
 /** The fixed-size surface strokes are drawn onto. */

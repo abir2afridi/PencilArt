@@ -5,8 +5,8 @@ import { CtrlIcon } from "../icons";
 
 /**
  * The reusable-element library: the elements in hand can be banked here and
- * dropped back onto any page. Everything lives in the browser — localStorage,
- * nothing leaves the machine — and each item keeps whatever the elements
+ * dropped back onto any page. Everything lives in the browser - localStorage,
+ * nothing leaves the machine - and each item keeps whatever the elements
  * carried (style, group, text, images).
  */
 type LibraryItem = {
@@ -48,15 +48,23 @@ export function LibraryControl({
 }) {
   const [items, setItems] = useState<LibraryItem[]>(() => load());
   const [query, setQuery] = useState("");
+  /** The item whose name is being typed, or null. */
+  const [editing, setEditing] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
   useEffect(() => save(items), [items]);
 
   const has = selection.length > 0;
-  const addSelection = () => {
+  const selectedStrokes = () => {
     const selected = new Set(selection);
-    const strokes = draw.current
-      ?.getStrokes()
-      .filter((s) => selected.has(s.id));
-    if (!strokes?.length) return;
+    return (
+      draw.current
+        ?.getStrokes()
+        .filter((s) => selected.has(s.id)) ?? []
+    );
+  };
+  const addSelection = () => {
+    const strokes = selectedStrokes();
+    if (!strokes.length) return;
     const id = Date.now();
     const name = `${strokes.length} element${strokes.length > 1 ? "s" : ""}`;
     setItems((prev) =>
@@ -70,6 +78,33 @@ export function LibraryControl({
 
   const remove = (id: number) =>
     setItems((prev) => prev.filter((i) => i.id !== id));
+
+  const rename = (id: number, name: string) =>
+    setItems((prev) =>
+      prev.map((i) =>
+        i.id === id ? { ...i, name: name.trim() || i.name } : i,
+      ),
+    );
+
+  const startRename = (item: LibraryItem) => {
+    setEditing(item.id);
+    setDraft(item.name);
+  };
+  const commitRename = () => {
+    if (editing !== null) rename(editing, draft);
+    setEditing(null);
+  };
+
+  /** Replace an item's contents with the elements in hand. */
+  const updateFromSelection = (id: number) => {
+    const strokes = selectedStrokes();
+    if (!strokes.length) return;
+    setItems((prev) =>
+      prev.map((i) =>
+        i.id === id ? { ...i, strokes, updated: Date.now() } : i,
+      ),
+    );
+  };
 
   const shown = query
     ? items.filter((i) => i.name.toLowerCase().includes(query.toLowerCase()))
@@ -88,7 +123,7 @@ export function LibraryControl({
           </Chip>
           <input
             aria-label="Search the library"
-            placeholder="search…"
+            placeholder="search."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             style={{
@@ -107,16 +142,54 @@ export function LibraryControl({
               nothing banked yet
             </Chip>
           ) : (
-            shown.map((item) => (
-              <span key={item.id} style={{ display: "inline-flex", gap: 3 }}>
-                <Chip label={item.name} onClick={() => insert(item)}>
-                  {item.name}
-                </Chip>
-                <Chip label={`Remove ${item.name}`} onClick={() => remove(item.id)}>
-                  ×
-                </Chip>
-              </span>
-            ))
+            shown.map((item) =>
+              editing === item.id ? (
+                <span key={item.id} style={{ display: "inline-flex", gap: 3 }}>
+                  <input
+                    aria-label={`Rename ${item.name}`}
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename();
+                      if (e.key === "Escape") setEditing(null);
+                    }}
+                    autoFocus
+                    style={{
+                      width: 96,
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      borderRadius: 6,
+                      padding: "4px 6px",
+                      background: "rgba(255,255,255,0.07)",
+                      color: "inherit",
+                      font: "inherit",
+                      outline: "none",
+                    }}
+                  />
+                  <Chip label={`Save the name ${item.name}`} onClick={commitRename}>
+                    ✓
+                  </Chip>
+                </span>
+              ) : (
+                <span key={item.id} style={{ display: "inline-flex", gap: 3 }}>
+                  <Chip label={item.name} onClick={() => insert(item)}>
+                    {item.name}
+                  </Chip>
+                  <Chip label={`Rename ${item.name}`} onClick={() => startRename(item)}>
+                    ✎
+                  </Chip>
+                  <Chip
+                    label={`Replace ${item.name} with the selection`}
+                    disabled={!has}
+                    onClick={() => updateFromSelection(item.id)}
+                  >
+                    ↻
+                  </Chip>
+                  <Chip label={`Remove ${item.name}`} onClick={() => remove(item.id)}>
+                    x
+                  </Chip>
+                </span>
+              ),
+            )
           )}
         </>
       )}

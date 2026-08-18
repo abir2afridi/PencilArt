@@ -1,9 +1,15 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import { resolveBindings } from "../engine/geometry";
 import type { Stroke } from "../engine/types";
 
 /** Stroke list + undo/redo, exposed as a small transaction API. */
 export type DrawingController = {
+  /** Every stroke, with connector bindings resolved against the current
+   *  element boxes. What renders and what hit-testing uses. */
   strokes: Stroke[];
+  /** The strokes as committed: bound connectors keep their stored anchors
+   *  instead of re-derived ones, so this is the stable geometry. */
+  raw: Stroke[];
   canUndo: boolean;
   canRedo: boolean;
   /** Replace the strokes and push one history entry. */
@@ -85,9 +91,13 @@ export function useDrawing(initial: Stroke[] = []): DrawingController {
     setFuture([]);
   }, []);
 
+  // Connectors are kept fresh against their bound elements on every change.
+  const resolved = useMemo(() => resolveBindings(strokes), [strokes]);
+
   return useMemo(
     () => ({
-      strokes,
+      strokes: resolved,
+      raw: strokes,
       canUndo: past.length > 0,
       canRedo: future.length > 0,
       commit,
@@ -100,6 +110,7 @@ export function useDrawing(initial: Stroke[] = []): DrawingController {
       reset,
     }),
     [
+      resolved,
       strokes,
       past.length,
       future.length,

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Draw,
   isShape,
@@ -11,13 +11,31 @@ import { Debug, type DebugState, defaults } from "./Debug";
 import { Sidebar } from "./components/Sidebar";
 import css from "./App.module.css";
 
+/** Where the book lives between visits: the whole stack, plus which page
+    was open. */
+const BOOK_KEY = "pencilart:book:v1";
+
+function loadBook(): { pages: Stroke[][]; page: number } {
+  try {
+    const raw = localStorage.getItem(BOOK_KEY);
+    if (!raw) return { pages: [[]], page: 0 };
+    const parsed = JSON.parse(raw) as { pages?: Stroke[][]; page?: number };
+    if (!Array.isArray(parsed.pages) || !parsed.pages.length) {
+      return { pages: [[]], page: 0 };
+    }
+    return { pages: parsed.pages, page: Math.min(parsed.page ?? 0, parsed.pages.length - 1) };
+  } catch {
+    return { pages: [[]], page: 0 };
+  }
+}
+
 /** Demo harness. The <Draw /> line is all a consumer writes. */
 export default function App() {
   const [debug, setDebug] = useState<DebugState>(defaults);
   const [shell, setShell] = useState<"dark" | "light">("dark");
   /** Every page is its own drawing; the harness keeps the whole stack. */
-  const [pages, setPages] = useState<Stroke[][]>([[]]);
-  const [page, setPage] = useState(0);
+  const [pages, setPages] = useState<Stroke[][]>(() => loadBook().pages);
+  const [page, setPage] = useState(() => loadBook().page);
   /** The page being flipped away, if a turn is in flight. */
   const [turning, setTurning] = useState<number | null>(null);
   /** The strokes the turning page flips away with, captured at turn time. */
@@ -34,6 +52,15 @@ export default function App() {
   const [selection, setSelection] = useState<number[]>([]);
   /** The part of the board in view, mirrored so the header can zoom. */
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
+
+  // The book lives in localStorage: a reload comes back to the same stack.
+  useEffect(() => {
+    try {
+      localStorage.setItem(BOOK_KEY, JSON.stringify({ pages, page }));
+    } catch {
+      /* a full or private store is fine to ignore */
+    }
+  }, [pages, page]);
 
   /** A brand-new blank page, made current. */
   const addPage = () => {
@@ -106,6 +133,7 @@ export default function App() {
           onZoom={(factor) => draw.current?.zoomBy(factor)}
           onZoomReset={() => draw.current?.zoomReset()}
           onZoomFit={() => draw.current?.zoomFit()}
+          onZoomSelection={() => draw.current?.zoomToSelection()}
         />
       </header>
       {/* The controls down the left edge, and the book taking the rest. */}
@@ -155,6 +183,7 @@ export default function App() {
         look={debug.look}
         gauge={debug.gauge}
         shortcuts={debug.shortcuts}
+        grid={debug.grid}
         draggable={debug.draggable}
         /* The canvas colour is the host's call, not the component's —
            but a dark theme over a white page is nobody's intent. */

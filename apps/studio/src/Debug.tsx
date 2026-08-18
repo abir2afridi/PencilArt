@@ -32,6 +32,7 @@ export function Debug({
   onZoom,
   onZoomReset,
   onZoomFit,
+  onZoomSelection,
 }: {
   shell: "dark" | "light";
   onShell: (next: "dark" | "light") => void;
@@ -59,6 +60,7 @@ export function Debug({
   onZoom: (factor: number) => void;
   onZoomReset: () => void;
   onZoomFit: () => void;
+  onZoomSelection: () => void;
 }) {
   return (
     <div className={css.bar}>
@@ -73,6 +75,7 @@ export function Debug({
         onZoom={onZoom}
         onReset={onZoomReset}
         onFit={onZoomFit}
+        onSelection={onZoomSelection}
       />
 
       <PageControls

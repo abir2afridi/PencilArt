@@ -19,13 +19,15 @@ import {
   marqueeHits,
   nextId,
   polylinePath,
+  rotateAbout,
   strokePath,
   translateStroke,
   unionBounds,
 } from "../engine/geometry";
 import { PEN_BY_ID } from "../engine/pens";
+import { nextFrameName } from "../engine/shapes/frame";
 import { HAND, measureLines } from "../engine/text";
-import type { Board, FigureDash, FigureFill, Point, ShapeKind, Stroke } from "../engine/types";
+import type { Board, Box, FigureDash, FigureFill, Point, Shape, ShapeKind, Stroke } from "../engine/types";
 import type { DrawingController } from "../hooks/use-drawing";
 
 export type Tool =
@@ -58,11 +60,18 @@ export type DrawSurfaceProps = {
   tool: Tool;
   /** The part of the board in view. Zoom is about the pointer; the wheel
    *  pans unless a modifier turns it into zoom. */
-  view?: View;
-  onViewChange?: (view: View) => void;
-  /** The ids of the elements in hand. */
+  view: View;
+  onViewChange: (view: View) => void;
+  /** The elements in hand, by id. */
   selection?: number[];
   onSelection?: (ids: number[]) => void;
+  /** A right-click on the surface: the event, and the board point under it. */
+  onContextMenu?: (
+    e: React.MouseEvent<SVGSVGElement>,
+    point: { x: number; y: number },
+  ) => void;
+  /** Draw a GRID-unit lattice under the ink, and snap draws and drags to it. */
+  grid?: boolean;
   /** Show a ring at the pointer at the brush's true size. Off for touch-only. */
   showBrushCursor?: boolean;
   /** Ignore all input — the surface is inert but still shows the drawing. */
@@ -103,9 +112,13 @@ type Gesture =
       vy: number;
     }
   | { mode: "move"; ids: number[] }
+  | { mode: "bend"; ids: number[] }
   | { mode: "resize"; ids: number[]; handle: number; union: { x: number; y: number; w: number; h: number } }
   | { mode: "rotate"; ids: number[]; center: [number, number] }
   | { mode: "marquee" };
+
+/** The grid step, in board units, when the grid is on. */
+const GRID = 20;
 
 /** The eight resize points, corner to corner, clockwise. */
 const HANDLES = [
@@ -119,6 +132,62 @@ const HANDLES = [
   [-1, 0],
 ] as const;
 
+/** The point of a linear element a bend handle rides: the curve's midpoint,
+    or the plain segment's midpoint when the shaft is straight. */
+function curveMid(f: Shape): readonly [number, number] {
+  const sx = f.x;
+  const sy = f.y;
+  const ex = f.x + f.w;
+  const ey = f.y + f.h;
+  return f.bend
+    ? [(sx + 2 * f.bend.x + ex) / 4, (sy + 2 * f.bend.y + ey) / 4]
+    : [(sx + ex) / 2, (sy + ey) / 2];
+}
+
+/** Sticky anchors: an arrow whose tip starts or ends on a closed shape
+    records where it landed, so the shape carries the arrow with it. */
+function bindArrowAnchors(stroke: Stroke, all: Stroke[]): void {
+  const f = stroke.figure!;
+  const bind = (ax: number, ay: number): { id?: number; ox?: number; oy?: number } => {
+    for (let i = all.length - 1; i >= 0; i--) {
+      const el = all[i];
+      if (el.locked || el.erase) continue;
+      const ef = el.figure;
+      if (
+        !ef ||
+        ef.kind === "line" ||
+        ef.kind === "arrow" ||
+        ef.kind === "double-arrow"
+      ) {
+        continue;
+      }
+      if (!hitTest(el, ax, ay, 6)) continue;
+      const b = boundsOf(el);
+      if (el.rotate) {
+        const [cx, cy] = centreOf(b);
+        const [rx, ry] = rotateAbout(ax - cx, ay - cy, 0, 0, -el.rotate);
+        return { id: el.id, ox: rx + b.w / 2, oy: ry + b.h / 2 };
+      }
+      return { id: el.id, ox: ax - b.x, oy: ay - b.y };
+    }
+    return {};
+  };
+  const s = bind(f.x, f.y);
+  const e = bind(f.x + f.w, f.y + f.h);
+  const bound: Shape["bound"] = {};
+  if (s.id !== undefined) {
+    bound.start = s.id;
+    bound.sx = s.ox;
+    bound.sy = s.oy;
+  }
+  if (e.id !== undefined) {
+    bound.end = e.id;
+    bound.ex = e.ox;
+    bound.ey = e.oy;
+  }
+  if (bound.start !== undefined || bound.end !== undefined) f.bound = bound;
+}
+
 export function DrawSurface({
   drawing,
   board,
@@ -128,6 +197,8 @@ export function DrawSurface({
   onViewChange,
   selection = [],
   onSelection,
+  onContextMenu,
+  grid = false,
   showBrushCursor = true,
   disabled = false,
   className,
@@ -302,6 +373,15 @@ export function DrawSurface({
       const grab = 11 / k;
       const u = selUnion(ids);
       const cx = u.x + u.w / 2;
+      // A single line or arrow bends from its curve's midpoint.
+      if (ids.length === 1) {
+        const s = drawing.strokes.find((st) => st.id === ids[0]);
+        const f = s?.figure;
+        if (f && (f.kind === "line" || f.kind === "arrow" || f.kind === "double-arrow")) {
+          const [mx, my] = curveMid(f);
+          if (Math.hypot(x - mx, y - my) <= grab) return 9;
+        }
+      }
       const spots: [number, number][] = HANDLES.map(([hx, hy]) => [
         u.x + (u.w / 2) * (hx + 1),
         u.y + (u.h / 2) * (hy + 1),
@@ -313,7 +393,7 @@ export function DrawSurface({
       if (Math.hypot(x - cx, y - (u.y - 26 / k)) <= grab) return 8;
       return null;
     },
-    [selUnion],
+    [selUnion, drawing.strokes],
   );
 
   /** Expand a click on one member to its whole group. */
@@ -351,6 +431,133 @@ export function DrawSurface({
     [drawing.strokes],
   );
 
+  /** Whether a stroke is a frame. */
+  const isFrame = useCallback((s: Stroke) => s.figure?.kind === "frame", []);
+
+  /** The members of the frames among `ids`, not already included: moving a
+      frame carries its contents along. */
+  const frameMembers = useCallback(
+    (ids: number[]) => {
+      const frames = new Set(
+        ids.filter((id) =>
+          drawing.strokes.some((s) => s.id === id && isFrame(s)),
+        ),
+      );
+      if (!frames.size) return [];
+      return drawing.strokes
+        .filter(
+          (s) =>
+            s.frameId !== undefined &&
+            frames.has(s.frameId) &&
+            !ids.includes(s.id) &&
+            !s.locked,
+        )
+        .map((s) => s.id);
+    },
+    [drawing.strokes, isFrame],
+  );
+
+  /** The innermost frame that fully contains the box — the deepest container
+      wins, and frames never sit inside frames. */
+  const assignFrame = useCallback(
+    (b: Box): number | undefined => {
+      let best: Stroke | undefined;
+      let bestArea = Infinity;
+      for (const f of drawing.strokes) {
+        if (!isFrame(f) || !f.figure) continue;
+        const { x, y, w, h } = f.figure;
+        if (b.x >= x && b.y >= y && b.x + b.w <= x + w && b.y + b.h <= y + h) {
+          const area = w * h;
+          if (area < bestArea) {
+            best = f;
+            bestArea = area;
+          }
+        }
+      }
+      return best?.id;
+    },
+    [drawing.strokes, isFrame],
+  );
+
+  /** Grid and object snap for a drag: return the adjusted delta. The grid
+   *  locks the union box onto GRID units; object snap then lines a box edge
+   *  up with another element's edge, or a centre with a centre, when they
+   *  come within 6 units. Other elements are read from the raw strokes —
+   *  a bound connector's resolved box follows its target and would make the
+   *  snap chase itself. */
+  const snapMove = useCallback(
+    (g: { mode: "move"; ids: number[] }, dx: number, dy: number): [number, number] => {
+      const origs = g.ids
+        .map((id) => orig.current?.get(id) ?? drawing.raw.find((s) => s.id === id))
+        .filter((s): s is Stroke => !!s);
+      const boxes = origs
+        .map((s) => s.figure)
+        .filter((f): f is NonNullable<typeof f> => !!f);
+      if (!boxes.length) return [dx, dy];
+      const ux = Math.min(...boxes.map((b) => b.x));
+      const uy = Math.min(...boxes.map((b) => b.y));
+      const ux2 = Math.max(...boxes.map((b) => b.x + b.w));
+      const uy2 = Math.max(...boxes.map((b) => b.y + b.h));
+      const ow = ux2 - ux;
+      const oh = uy2 - uy;
+      let ox = ux + dx;
+      let oy = uy + dy;
+      if (grid) {
+        ox = Math.round(ox / GRID) * GRID;
+        oy = Math.round(oy / GRID) * GRID;
+      }
+      // Edge targets and centre targets are matched only against the same
+      // sort of line on the other elements.
+      const xs: number[] = [];
+      const xc: number[] = [];
+      const ys: number[] = [];
+      const yc: number[] = [];
+      for (const s of drawing.raw) {
+        if (s.erase || s.locked) continue;
+        if (g.ids.includes(s.id)) continue;
+        const f = s.figure;
+        if (!f) continue;
+        xs.push(f.x, f.x + f.w);
+        xc.push(f.x + f.w / 2);
+        ys.push(f.y, f.y + f.h);
+        yc.push(f.y + f.h / 2);
+      }
+      const TOL = 6;
+      let bestX = 0;
+      let bestY = 0;
+      for (const me of [ox, ox + ow]) {
+        for (const t of xs) {
+          const d = t - me;
+          if (Math.abs(d) <= TOL && (bestX === 0 || Math.abs(d) < Math.abs(bestX)))
+            bestX = d;
+        }
+      }
+      for (const me of [ox + ow / 2]) {
+        for (const t of xc) {
+          const d = t - me;
+          if (Math.abs(d) <= TOL && (bestX === 0 || Math.abs(d) < Math.abs(bestX)))
+            bestX = d;
+        }
+      }
+      for (const me of [oy, oy + oh]) {
+        for (const t of ys) {
+          const d = t - me;
+          if (Math.abs(d) <= TOL && (bestY === 0 || Math.abs(d) < Math.abs(bestY)))
+            bestY = d;
+        }
+      }
+      for (const me of [oy + oh / 2]) {
+        for (const t of yc) {
+          const d = t - me;
+          if (Math.abs(d) <= TOL && (bestY === 0 || Math.abs(d) < Math.abs(bestY)))
+            bestY = d;
+        }
+      }
+      return [dx + (ox - (ux + dx)) + bestX, dy + (oy - (uy + dy)) + bestY];
+    },
+    [drawing.raw, grid],
+  );
+
   const startSelectGesture = (x: number, y: number, e: React.PointerEvent) => {
     const st = state.current;
     const ids = st.selection;
@@ -364,6 +571,8 @@ export function DrawSurface({
           const u = selUnion(ids);
           const center = [u.x + u.w / 2, u.y + u.h / 2] as [number, number];
           gesture.current = { mode: "rotate", ids, center };
+        } else if (h === 9) {
+          gesture.current = { mode: "bend", ids };
         } else {
           gesture.current = { mode: "resize", ids, handle: h, union: selUnion(ids) };
         }
@@ -383,9 +592,11 @@ export function DrawSurface({
         st.onSelection?.(picked);
         state.current.selection = picked;
       }
-      gesture.current = { mode: "move", ids: picked };
+      // A frame takes its members with it; they're not selected, just moved.
+      const moveIds = [...picked, ...frameMembers(picked)];
+      gesture.current = { mode: "move", ids: moveIds };
       pointsRef.current = [[x, y, 1]];
-      snapshot(picked);
+      snapshot(moveIds);
       drawing.begin();
       return;
     }
@@ -466,12 +677,36 @@ export function DrawSurface({
 
     if (g.mode === "move") {
       const start = pointsRef.current[0] ?? [x, y];
-      const dx = x - start[0];
-      const dy = y - start[1];
+      let dx = x - start[0];
+      let dy = y - start[1];
+      [dx, dy] = snapMove(g, dx, dy);
       drawing.update(
         mapSelected(g.ids, (s) =>
           translateStroke(orig.current?.get(s.id) ?? s, dx, dy),
         ),
+      );
+      return;
+    }
+
+    // Bending: the control point follows the pointer, kept inside the box so
+    // the curve never escapes the selection chrome.
+    if (g.mode === "bend") {
+      drawing.update(
+        mapSelected(g.ids, (s) => {
+          const f = s.figure;
+          if (!f) return s;
+          const pad = 1;
+          return {
+            ...s,
+            figure: {
+              ...f,
+              bend: {
+                x: Math.max(f.x + pad, Math.min(f.x + f.w - pad, x)),
+                y: Math.max(f.y + pad, Math.min(f.y + f.h - pad, y)),
+              },
+            },
+          };
+        }),
       );
       return;
     }
@@ -597,7 +832,13 @@ export function DrawSurface({
     ) {
       const start = pts[0];
       if (!start) return;
-      const end: Point = [x, y, pressure];
+      let end: Point = [x, y, pressure];
+      if (grid) {
+        start[0] = Math.round(start[0] / GRID) * GRID;
+        start[1] = Math.round(start[1] / GRID) * GRID;
+        end[0] = Math.round(end[0] / GRID) * GRID;
+        end[1] = Math.round(end[1] / GRID) * GRID;
+      }
       if (e.shiftKey) {
         const shape = anchorsToShape(tool.kind, start, end, true);
         end[0] = shape.w === 0 ? start[0] : shape.x + shape.w;
@@ -687,7 +928,7 @@ export function DrawSurface({
       return;
     }
 
-    if (g.mode === "move" || g.mode === "resize" || g.mode === "rotate") {
+    if (g.mode === "move" || g.mode === "resize" || g.mode === "rotate" || g.mode === "bend") {
       drawing.end();
       drawingNow.current = false;
       pointsRef.current = [];
@@ -730,7 +971,15 @@ export function DrawSurface({
         opacity: tool.opacity,
         points: pts,
         figure,
+        frameId: assignFrame(figure),
       };
+      if (tool.kind === "frame") {
+        stroke.figure!.frameName = nextFrameName(drawing.strokes);
+        stroke.frameId = undefined;
+      }
+      if (tool.kind === "arrow" || tool.kind === "double-arrow") {
+        bindArrowAnchors(stroke, drawing.strokes);
+      }
       drawing.commit([...drawing.strokes, stroke]);
       state.current.onSelection?.([stroke.id]);
       return;
@@ -758,6 +1007,7 @@ export function DrawSurface({
               opacity: tool.opacity,
               points: pts,
               shape: { ...tool.shape, simulatePressure: !realPressure.current },
+              frameId: assignFrame(boundsOf({ id: 0, pen: tool.pen, color: tool.color, size: tool.size, opacity: tool.opacity, points: pts })),
             },
       ]);
     }
@@ -779,6 +1029,8 @@ export function DrawSurface({
     font: string;
     bold?: boolean;
     italic?: boolean;
+    align?: "left" | "center" | "right";
+    background?: string;
     content: string;
   };
   const [editing, setEditing] = useState<TextDraft | null>(null);
@@ -803,6 +1055,8 @@ export function DrawSurface({
         font: t.font,
         bold: t.bold,
         italic: t.italic,
+        align: t.align,
+        background: t.background,
         content: t.content,
       });
       return;
@@ -843,6 +1097,8 @@ export function DrawSurface({
           font: draft.font,
           bold: draft.bold,
           italic: draft.italic,
+          align: draft.align,
+          background: draft.background,
         },
       };
       return stroke;
@@ -879,6 +1135,8 @@ export function DrawSurface({
                   h: laid.h,
                   bold: draft.bold,
                   italic: draft.italic,
+                  align: draft.align,
+                  background: draft.background,
                 },
               }
             : s,
@@ -902,6 +1160,20 @@ export function DrawSurface({
       })),
       ink: layer.ink.map((i) => {
         const st = all[i];
+        if (st.figure?.kind === "frame") {
+          const f = st.figure;
+          return {
+            id: st.id,
+            kind: "frame" as const,
+            x: f.x,
+            y: f.y,
+            w: f.w,
+            h: f.h,
+            name: f.frameName,
+            width: st.size,
+            opacity: st.opacity,
+          };
+        }
         if (st.figure) {
           const { d, head } = figureMarkup(st.figure, st.size);
           return {
@@ -913,6 +1185,7 @@ export function DrawSurface({
             color: st.color,
             opacity: st.opacity,
             fill: st.figure.fill ?? false,
+            fillColor: st.figure.fillColor ?? null,
             dash: st.figure.dash ?? "solid",
           };
         }
@@ -943,6 +1216,8 @@ export function DrawSurface({
             font: st.text.font,
             bold: st.text.bold,
             italic: st.text.italic,
+            align: st.text.align,
+            background: st.text.background,
             color: st.color,
             opacity: st.opacity,
           };
@@ -1042,6 +1317,31 @@ export function DrawSurface({
           strokeWidth={1.5 * s}
           style={{ cursor: "crosshair", pointerEvents: "all" }}
         />
+        {/* A single line or arrow bends from its curve's midpoint. */}
+        {ids.length === 1 &&
+          (() => {
+            const lone = drawing.strokes.find((st) => st.id === ids[0]);
+            const lf = lone?.figure;
+            if (
+              !lf ||
+              (lf.kind !== "line" && lf.kind !== "arrow" && lf.kind !== "double-arrow")
+            ) {
+              return null;
+            }
+            const [mx, my] = curveMid(lf);
+            return (
+              <circle
+                data-handle={9}
+                cx={mx}
+                cy={my}
+                r={r}
+                fill="#fff"
+                stroke="#3b82f6"
+                strokeWidth={1.5 * s}
+                style={{ cursor: "crosshair", pointerEvents: "all" }}
+              />
+            );
+          })()}
         {/* The centre point: useful when rotating several things at once. */}
         <circle cx={cx} cy={cy} r={2.5 * s} fill="#3b82f6" />
       </g>
@@ -1087,7 +1387,24 @@ export function DrawSurface({
         setHover(null);
         finishGesture(e);
       }}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        // A right-click on an element brings it into the hand first, so the
+        // menu acts on what the pointer is on.
+        const { x, y } = toBoard(e.clientX, e.clientY);
+        for (let i = drawing.strokes.length - 1; i >= 0; i--) {
+          const s = drawing.strokes[i];
+          if (s.erase) continue;
+          if (!hitTest(s, x, y)) continue;
+          const picked = expandGroup(s.id);
+          if (!selection.includes(s.id)) {
+            state.current.onSelection?.(picked);
+            state.current.selection = picked;
+          }
+          break;
+        }
+        onContextMenu?.(e, { x, y });
+      }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -1126,6 +1443,20 @@ export function DrawSurface({
           <rect width="8" height="8" fill="#ececec" />
           <rect x="8" y="8" width="8" height="8" fill="#ececec" />
         </pattern>
+        <pattern
+          id={`g-${uid}`}
+          width={GRID}
+          height={GRID}
+          patternUnits="userSpaceOnUse"
+        >
+          <path
+            d={`M${GRID} 0H0V${GRID}`}
+            fill="none"
+            stroke="#000"
+            strokeOpacity="0.07"
+            strokeWidth="1"
+          />
+        </pattern>
         <clipPath id={`b-${uid}`}>
           <rect
             x={v.x}
@@ -1152,6 +1483,15 @@ export function DrawSurface({
         />
 
         <g clipPath={`url(#b-${uid})`}>
+          {grid && (
+            <rect
+              x={v.x}
+              y={v.y}
+              width={board.w / v.k}
+              height={board.h / v.k}
+              fill={`url(#g-${uid})`}
+            />
+          )}
           {layers.map((layer, li) => {
             // The pass in progress subtracts too, so erasing is visible under
             // the nub as it happens rather than only on release.
@@ -1200,7 +1540,9 @@ export function DrawSurface({
                   const rot = drawing.strokes.find((st) => st.id === s.id);
                   const rotate = rot?.rotate;
                   const g =
-                    s.kind === "figure" ? (
+                    s.kind === "frame" ? (
+                      <FrameShape x={s.x} y={s.y} w={s.w} h={s.h} name={s.name} width={s.width} />
+                    ) : s.kind === "figure" ? (
                       <FigureShape
                         d={s.d}
                         head={s.head}
@@ -1208,6 +1550,7 @@ export function DrawSurface({
                         color={s.color}
                         opacity={s.opacity}
                         fill={s.fill}
+                        fillColor={s.fillColor}
                         dash={s.dash}
                       />
                     ) : s.kind === "image" ? (
@@ -1277,21 +1620,36 @@ export function DrawSurface({
             tool.kind !== "select" &&
             tool.kind !== "text" &&
             current.length > 1 &&
-            (() => {
-              const { d, head } = figureMarkup(
-                anchorsToShape(tool.kind, current[0], current[1]),
-                tool.size,
-              );
-              return (
-                <FigureShape
-                  d={d}
-                  head={head}
-                  width={tool.size}
-                  color={tool.color}
-                  opacity={tool.opacity}
-                />
-              );
-            })()}
+            (tool.kind === "frame" ? (
+              (() => {
+                const f = anchorsToShape(tool.kind, current[0], current[1]);
+                return (
+                  <FrameShape
+                    x={f.x}
+                    y={f.y}
+                    w={f.w}
+                    h={f.h}
+                    width={tool.size}
+                  />
+                );
+              })()
+            ) : (
+              (() => {
+                const { d, head } = figureMarkup(
+                  anchorsToShape(tool.kind, current[0], current[1]),
+                  tool.size,
+                );
+                return (
+                  <FigureShape
+                    d={d}
+                    head={head}
+                    width={tool.size}
+                    color={tool.color}
+                    opacity={tool.opacity}
+                  />
+                );
+              })()
+            ))}
 
           {/* The text being typed, live under the overlay. */}
           {editing && (
@@ -1306,6 +1664,8 @@ export function DrawSurface({
               font={editing.font}
               bold={editing.bold}
               italic={editing.italic}
+              align={editing.align}
+              background={editing.background}
               color={editing.color}
               opacity={1}
             />
@@ -1353,6 +1713,7 @@ export function DrawSurface({
                     fontSize: editing.size,
                     fontWeight: editing.bold ? 700 : 400,
                     fontStyle: editing.italic ? "italic" : "normal",
+                    textAlign: editing.align ?? "left",
                     lineHeight: 1.35,
                     overflow: "hidden",
                     whiteSpace: "pre",
@@ -1445,6 +1806,7 @@ function FigureShape({
   color,
   opacity,
   fill,
+  fillColor,
   dash,
 }: {
   d: string;
@@ -1453,12 +1815,15 @@ function FigureShape({
   color: string;
   opacity: number;
   fill?: FigureFill | boolean;
+  fillColor?: string | null;
   dash?: FigureDash;
 }) {
   const uid = useId().replace(/:/g, "");
   const closed = d.endsWith("Z");
   const mode: FigureFill | null =
     fill === true ? "solid" : fill === false || !fill ? null : fill;
+  /** The fill's own colour, or the stroke colour when it has none. */
+  const ink = fillColor ?? color;
   const hatch = (id: string, angle: number) => (
     <pattern
       id={id}
@@ -1472,7 +1837,7 @@ function FigureShape({
         y1="0"
         x2="0"
         y2="8"
-        stroke={color}
+        stroke={ink}
         strokeOpacity={0.25 * opacity}
         strokeWidth={1.2}
       />
@@ -1481,7 +1846,7 @@ function FigureShape({
   return (
     <g opacity={opacity}>
       {closed && mode === "solid" && (
-        <path d={d} fill={color} fillOpacity={0.22 * opacity} />
+        <path d={d} fill={ink} fillOpacity={0.22 * opacity} />
       )}
       {closed && (mode === "hachure" || mode === "cross-hatch") && (
         <g>
@@ -1507,15 +1872,65 @@ function FigureShape({
   );
 }
 
+/** A frame: a light container box with a dashed edge and its name in the
+    top-left corner. It reads as a region, not an outline. */
+function FrameShape({
+  x,
+  y,
+  w,
+  h,
+  name,
+  width,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  name?: string;
+  width: number;
+}) {
+  const d = `M${x} ${y}h${w}v${h}h${-w}Z`;
+  return (
+    <g opacity={0.9}>
+      <path d={d} fill="rgba(80,140,255,0.08)" />
+      <path
+        d={d}
+        fill="none"
+        stroke="rgba(80,140,255,0.6)"
+        strokeWidth={Math.max(1, width)}
+        strokeDasharray="6 5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {name ? (
+        <text
+          x={x + 6}
+          y={y + 14}
+          fontFamily="ui-sans-serif, system-ui, sans-serif"
+          fontSize="12"
+          fontWeight="600"
+          fill="#5a8dff"
+        >
+          {name}
+        </text>
+      ) : null}
+    </g>
+  );
+}
+
 /** A committed text mark, one tspan per line. */
 function TextShape({
   content,
   x,
   y,
   size,
+  w,
+  h,
   font,
   bold,
   italic,
+  align,
+  background,
   color,
   opacity,
 }: {
@@ -1529,28 +1944,47 @@ function TextShape({
   font: string;
   bold?: boolean;
   italic?: boolean;
+  align?: "left" | "center" | "right";
+  background?: string;
   color: string;
   opacity: number;
 }) {
   const lineH = lineHeight(size);
   const lines = content.split("\n");
+  // Where the lines sit inside the mark's box, and how each is anchored.
+  const tx =
+    align === "center" ? x + w / 2 : align === "right" ? x + w : x;
+  const anchor = align === "center" ? "middle" : align === "right" ? "end" : "start";
   return (
-    <text
-      x={x}
-      y={y + size * 0.85}
-      fontFamily={font}
-      fontSize={size}
-      fontWeight={bold ? 700 : undefined}
-      fontStyle={italic ? "italic" : undefined}
-      fill={color}
-      fillOpacity={opacity}
-    >
-      {lines.map((line, i) => (
-        <tspan key={i} x={x} dy={i === 0 ? 0 : lineH}>
-          {line}
-        </tspan>
-      ))}
-    </text>
+    <g opacity={opacity}>
+      {background && (
+        <rect
+          x={x}
+          y={y}
+          width={w}
+          height={h}
+          rx={Math.min(4, size / 4)}
+          fill={background}
+        />
+      )}
+      <text
+        x={tx}
+        textAnchor={anchor}
+        y={y + size * 0.85}
+        fontFamily={font}
+        fontSize={size}
+        fontWeight={bold ? 700 : undefined}
+        fontStyle={italic ? "italic" : undefined}
+        fill={color}
+        fillOpacity={opacity}
+      >
+        {lines.map((line, i) => (
+          <tspan key={i} x={tx} dy={i === 0 ? 0 : lineH}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
   );
 }
 

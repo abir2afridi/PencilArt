@@ -694,6 +694,13 @@ const GLYPHS: Record<ShapeKind, React.ReactElement> = {
       <path d="M12 51h-5v-5" />
     </>
   ),
+  frame: (
+    <>
+      <path d="M8 40h6v6h-6Z" />
+      <path d="M30 40h6v6h-6Z" />
+      <path d="M8 40v-4M8 40h6M30 40h6v-4M30 46h6M8 46v4M14 46v4" />
+    </>
+  ),
 };
 
 /**

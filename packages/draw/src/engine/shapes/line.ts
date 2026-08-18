@@ -10,8 +10,10 @@ export const line: ShapeDef = {
   key: "l",
   defaultSize: 6,
   defaultOpacity: 1,
-  figure({ x, y, w, h }) {
-    return { d: `M${r(x)} ${r(y)}L${r(x + w)} ${r(y + h)}` };
+  figure({ x, y, w, h, bend }) {
+    return bend
+      ? { d: `M${r(x)} ${r(y)}Q${r(bend.x)} ${r(bend.y)} ${r(x + w)} ${r(y + h)}` }
+      : { d: `M${r(x)} ${r(y)}L${r(x + w)} ${r(y + h)}` };
   },
   snap(w, h) {
     const len = Math.hypot(w, h);

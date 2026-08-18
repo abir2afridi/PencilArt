@@ -42,6 +42,12 @@ export function ToolsControl({
           >
             keys
           </Toggle>
+          <Toggle
+            on={value.grid}
+            onClick={() => onChange({ ...value, grid: !value.grid })}
+          >
+            grid
+          </Toggle>
         </>
       )}
     </Dropdown>

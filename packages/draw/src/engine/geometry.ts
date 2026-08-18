@@ -200,9 +200,15 @@ export function boundsOf(stroke: Stroke): Box {
 /** Move an element by dx,dy, whatever it is made of. */
 export function translateStroke(stroke: Stroke, dx: number, dy: number): Stroke {
   if (stroke.figure) {
+    const f = stroke.figure;
     return {
       ...stroke,
-      figure: { ...stroke.figure, x: stroke.figure.x + dx, y: stroke.figure.y + dy },
+      figure: {
+        ...f,
+        x: f.x + dx,
+        y: f.y + dy,
+        ...(f.bend ? { bend: { x: f.bend.x + dx, y: f.bend.y + dy } } : null),
+      },
     };
   }
   if (stroke.image || stroke.text) {
@@ -210,6 +216,84 @@ export function translateStroke(stroke: Stroke, dx: number, dy: number): Stroke 
     return { ...stroke, points: [[p0[0] + dx, p0[1] + dy, p0[2]]] };
   }
   return { ...stroke, points: stroke.points.map((p) => [p[0] + dx, p[1] + dy, p[2]]) };
+}
+
+/**
+ * Where an anchor bound to `el` sits: the stored offset from the element's
+ * box top-left, swung by the element's own rotation about its centre.
+ */
+function anchoredAt(
+  el: Stroke,
+  ox: number | undefined,
+  oy: number | undefined,
+): [number, number] {
+  const b = boundsOf(el);
+  const [cx, cy] = centreOf(b);
+  const [px, py] = rotateAbout(
+    (ox ?? 0) - b.w / 2,
+    (oy ?? 0) - b.h / 2,
+    0,
+    0,
+    el.rotate ?? 0,
+  );
+  return [cx + px, cy + py];
+}
+
+/**
+ * Refresh every connector against the elements it is bound to. Each bound
+ * anchor is placed at its stored offset from the element's current box, so
+ * moving or resizing an element pulls its arrows with it; a bound element
+ * that is gone drops the binding.
+ */
+export function resolveBindings(strokes: Stroke[]): Stroke[] {
+  const byId = new Map(strokes.map((s) => [s.id, s]));
+  let changed = false;
+  const out = strokes.map((s) => {
+    const b = s.figure?.bound;
+    if (!b) return s;
+    const elStart = b.start !== undefined ? byId.get(b.start) : undefined;
+    const elEnd = b.end !== undefined ? byId.get(b.end) : undefined;
+    if (b.start !== undefined && !elStart) {
+      b.start = undefined;
+      changed = true;
+    }
+    if (b.end !== undefined && !elEnd) {
+      b.end = undefined;
+      changed = true;
+    }
+    const fig = { ...s.figure! };
+    let ax = fig.x;
+    let ay = fig.y;
+    let ex = fig.x + fig.w;
+    let ey = fig.y + fig.h;
+    if (elStart) {
+      [ax, ay] = anchoredAt(elStart, b.sx, b.sy);
+      b.sx = ax - boundsOf(elStart).x;
+      b.sy = ay - boundsOf(elStart).y;
+      changed = true;
+    }
+    if (elEnd) {
+      [ex, ey] = anchoredAt(elEnd, b.ex, b.ey);
+      b.ex = ex - boundsOf(elEnd).x;
+      b.ey = ey - boundsOf(elEnd).y;
+      changed = true;
+    }
+    const x = Math.min(ax, ex);
+    const y = Math.min(ay, ey);
+    const w = Math.abs(ex - ax);
+    const h = Math.abs(ey - ay);
+    if (
+      fig.x !== x ||
+      fig.y !== y ||
+      fig.w !== w ||
+      fig.h !== h ||
+      changed
+    ) {
+      return { ...s, figure: { ...fig, x, y, w, h, bound: { ...b } } };
+    }
+    return s;
+  });
+  return changed ? out : out;
 }
 
 /** The box that covers every element. */
@@ -300,6 +384,14 @@ export function hitTest(stroke: Stroke, x: number, y: number, tol = 8): boolean 
   if (stroke.figure) {
     const { kind, x: fx, y: fy, w, h } = stroke.figure;
     if (kind === "line" || kind === "arrow" || kind === "double-arrow") {
+      if (stroke.figure.bend) {
+        const c = stroke.figure.bend;
+        const d = Math.min(
+          segDistance(x, y, fx, fy, c.x, c.y),
+          segDistance(x, y, c.x, c.y, fx + w, fy + h),
+        );
+        return d <= room;
+      }
       return segDistance(x, y, fx, fy, fx + w, fy + h) <= room;
     }
     return inBox(x, y, { x: fx, y: fy, w, h }, room);

@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { boundsOf, nextId, translateStroke, unionBounds } from "../engine/geometry";
+import { nextFrameName } from "../engine/shapes/frame";
 import type { FigureDash, FigureFill, Stroke } from "../engine/types";
 import type { DrawingController } from "./use-drawing";
 
@@ -10,12 +11,23 @@ export type StylePatch = {
   opacity?: number;
   /** The figure's fill; `null` clears it. */
   fill?: FigureFill | null;
+  /** The fill's own colour; `null` falls back to the stroke colour. */
+  fillColor?: string | null;
   /** The figure's shaft style; the arrow's head stays solid. */
   dash?: FigureDash;
+  /** How long the arrow head is; `null` lets it scale with the stroke. */
+  headSize?: number | null;
+  /** Whether the arrow carries heads on its start and end anchors. */
+  headStart?: boolean;
+  headEnd?: boolean;
   /** A text mark's font, and its emphasis. */
   font?: string;
   bold?: boolean;
   italic?: boolean;
+  /** How the lines of a text mark sit within its box. */
+  align?: "left" | "center" | "right";
+  /** A wash behind a text mark; `null` clears it. */
+  textBackground?: string | null;
 };
 
 export type ReorderHow = "front" | "back" | "forward" | "backward";
@@ -52,8 +64,25 @@ export function useSelection(drawing: DrawingController) {
               fill: patch.fill === null ? undefined : patch.fill,
             };
           }
+          if (patch.fillColor !== undefined) {
+            out.figure = {
+              ...out.figure,
+              fillColor:
+                patch.fillColor === null ? undefined : patch.fillColor,
+            };
+          }
           if (patch.dash !== undefined)
             out.figure = { ...out.figure, dash: patch.dash };
+          if (patch.headSize !== undefined) {
+            out.figure = {
+              ...out.figure,
+              headSize: patch.headSize === null ? undefined : patch.headSize,
+            };
+          }
+          if (patch.headStart !== undefined)
+            out.figure = { ...out.figure, headStart: patch.headStart };
+          if (patch.headEnd !== undefined)
+            out.figure = { ...out.figure, headEnd: patch.headEnd };
         }
         if (out.text) {
           if (patch.font !== undefined)
@@ -61,6 +90,17 @@ export function useSelection(drawing: DrawingController) {
           if (patch.bold !== undefined) out.text = { ...out.text, bold: patch.bold };
           if (patch.italic !== undefined)
             out.text = { ...out.text, italic: patch.italic };
+          if (patch.align !== undefined)
+            out.text = { ...out.text, align: patch.align };
+          if (patch.textBackground !== undefined) {
+            out.text = {
+              ...out.text,
+              background:
+                patch.textBackground === null
+                  ? undefined
+                  : patch.textBackground,
+            };
+          }
         }
         return out;
       });
@@ -74,7 +114,19 @@ export function useSelection(drawing: DrawingController) {
   const deleteSelection = useCallback(() => {
     const ids = new Set(selection);
     if (!ids.size) return;
-    const next = drawing.strokes.filter((s) => !ids.has(s.id) || s.locked);
+    // A deleted frame lets its members go — they stay on the page, loose.
+    const deadFrames = new Set(
+      drawing.strokes
+        .filter((s) => ids.has(s.id) && !s.locked && s.figure?.kind === "frame")
+        .map((s) => s.id),
+    );
+    const next = drawing.strokes
+      .filter((s) => !ids.has(s.id) || s.locked)
+      .map((s) =>
+        s.frameId !== undefined && deadFrames.has(s.frameId)
+          ? { ...s, frameId: undefined }
+          : s,
+      );
     drawing.commit(next);
     // A delete that deleted nothing (a locked selection) keeps the hand
     // intact, so you can still go and unlock the things.
@@ -94,7 +146,17 @@ export function useSelection(drawing: DrawingController) {
           if (!groupMap.has(group)) groupMap.set(group, nextId());
           group = groupMap.get(group);
         }
-        return { ...translateStroke(s, 10, 10), id: nextId(), group };
+        // A duplicated frame gets a fresh name, so the two never confuse.
+        const figure =
+          s.figure?.kind === "frame"
+            ? { ...s.figure, frameName: nextFrameName(drawing.strokes) }
+            : s.figure;
+        return {
+          ...translateStroke(s, 10, 10),
+          id: nextId(),
+          group,
+          figure,
+        };
       });
     drawing.commit([...drawing.strokes, ...copies]);
     setSelection(copies.map((c) => c.id));

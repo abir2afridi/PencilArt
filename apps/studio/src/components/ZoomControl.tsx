@@ -2,18 +2,21 @@ import { Chip } from "./Dropdown";
 import css from "./ZoomControl.module.css";
 
 /** Zoom in and out about the centre of the view, with the current scale as
-    a readout and a way back to the board's own scale or everything at once. */
+    a readout and a way back to the board's own scale, everything at once, or
+    the elements in hand. */
 export function ZoomControl({
   percent,
   onZoom,
   onReset,
   onFit,
+  onSelection,
 }: {
   /** The current scale, as a whole-number percentage. */
   percent: number;
   onZoom: (factor: number) => void;
   onReset: () => void;
   onFit: () => void;
+  onSelection: () => void;
 }) {
   return (
     <div className={css.zoom} role="group" aria-label="Zoom">
@@ -31,6 +34,9 @@ export function ZoomControl({
       </Chip>
       <Chip label="Fit the drawing to the view" onClick={onFit}>
         fit
+      </Chip>
+      <Chip label="Zoom to the selection" onClick={onSelection}>
+        sel
       </Chip>
     </div>
   );

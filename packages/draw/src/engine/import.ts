@@ -70,15 +70,27 @@ export function remapStrokes(
   centre: { x: number; y: number },
 ): Stroke[] {
   const groupMap = new Map<number, number>();
+  const idMap = new Map<number, number>();
   const out = strokes.map((s) => {
     let group = s.group;
     if (group !== undefined) {
       if (!groupMap.has(group)) groupMap.set(group, nextId());
       group = groupMap.get(group);
     }
-    const base = { ...s, id: nextId() };
+    const fresh = nextId();
+    idMap.set(s.id, fresh);
+    const base = { ...s, id: fresh };
     return group === undefined ? base : { ...base, group };
   });
+  // Connector links must follow their elements to their fresh ids.
+  for (const s of out) {
+    const b = s.figure?.bound;
+    if (!b) continue;
+    const bound = { ...b };
+    if (b.start !== undefined) bound.start = idMap.get(b.start);
+    if (b.end !== undefined) bound.end = idMap.get(b.end);
+    s.figure = { ...s.figure!, bound };
+  }
   const u = unionBounds(out);
   if (u.w > 0 || u.h > 0) {
     const dx = centre.x - (u.x + u.w / 2);
