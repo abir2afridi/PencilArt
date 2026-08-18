@@ -65,6 +65,10 @@ export type DrawSurfaceProps = {
   /** The elements in hand, by id. */
   selection?: number[];
   onSelection?: (ids: number[]) => void;
+  /** Fired once a figure has been committed — the mark is already in hand,
+   *  so the host can switch back to the select tool and let the next click
+   *  move or resize it. */
+  onShapeDone?: () => void;
   /** A right-click on the surface: the event, and the board point under it. */
   onContextMenu?: (
     e: React.MouseEvent<SVGSVGElement>,
@@ -197,6 +201,7 @@ export function DrawSurface({
   onViewChange,
   selection = [],
   onSelection,
+  onShapeDone,
   onContextMenu,
   grid = false,
   showBrushCursor = true,
@@ -233,8 +238,8 @@ export function DrawSurface({
   /** Whether the stroke in progress carries real hardware pressure. */
   const realPressure = useRef(false);
 
-  const state = useRef({ tool, drawing, selection, view, onViewChange, onSelection });
-  state.current = { tool, drawing, selection, view, onViewChange, onSelection };
+  const state = useRef({ tool, drawing, selection, view, onViewChange, onSelection, onShapeDone });
+  state.current = { tool, drawing, selection, view, onViewChange, onSelection, onShapeDone };
   const viewRef = useRef(view ?? { x: 0, y: 0, k: 1 });
   viewRef.current = view ?? { x: 0, y: 0, k: 1 };
 
@@ -982,6 +987,7 @@ export function DrawSurface({
       }
       drawing.commit([...drawing.strokes, stroke]);
       state.current.onSelection?.([stroke.id]);
+      state.current.onShapeDone?.();
       return;
     }
 

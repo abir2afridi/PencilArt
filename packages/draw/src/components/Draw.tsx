@@ -1379,6 +1379,9 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
           setSelection(ids);
           reportedSelection.current?.(ids);
         }}
+        /* A finished figure goes straight to the select tool, with the mark
+           already in hand — the next click moves or resizes it. */
+        onShapeDone={() => select("select")}
         onContextMenu={(e, _p) => setMenu({ x: e.clientX, y: e.clientY })}
         disabled={chrome && collapsed && !drawWhenMinimized}
         className={css.surface}
