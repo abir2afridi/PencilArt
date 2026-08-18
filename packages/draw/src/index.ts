@@ -5,12 +5,15 @@ export { getStroke } from "./engine/freehand";
 export type { FreehandOptions } from "./engine/freehand";
 export {
   anchorsToShape,
+  boundsOf,
   dotRadius,
   eraseLayers,
   figureMarkup,
   nextId,
   polylinePath,
   strokePath,
+  translateStroke,
+  unionBounds,
 } from "./engine/geometry";
 export { toPng, toSvg } from "./engine/serialize";
 export {
@@ -45,7 +48,12 @@ export type {
 // Hooks
 export { useDrawing } from "./hooks/use-drawing";
 export type { DrawingController } from "./hooks/use-drawing";
-export type { AlignHow, ReorderHow, StylePatch } from "./hooks/use-selection";
+export type {
+  AlignHow,
+  GeometryPatch,
+  ReorderHow,
+  StylePatch,
+} from "./hooks/use-selection";
 
 // Components
 export { Draw } from "./components/Draw";

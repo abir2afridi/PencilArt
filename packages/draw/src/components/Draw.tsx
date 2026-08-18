@@ -19,6 +19,7 @@ import { useClipboard } from "../hooks/use-clipboard";
 import {
   useSelection,
   type AlignHow,
+  type GeometryPatch,
   type ReorderHow,
   type StylePatch,
 } from "../hooks/use-selection";
@@ -129,6 +130,8 @@ export type DrawHandle = {
   zoomToSelection: () => void;
   /** Restyle the elements in hand as one undoable step. */
   styleSelection: (patch: StylePatch) => void;
+  /** Move, resize and rotate the elements in hand as one undoable step. */
+  geometrySelection: (patch: GeometryPatch) => void;
   /** Align the elements in hand to an edge of their union box. */
   alignSelection: (how: AlignHow) => void;
   /** Space the elements in hand evenly; needs at least three. */
@@ -348,6 +351,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
     selection,
     setSelection,
     styleSelection,
+    geometrySelection,
     deleteSelection,
     duplicateSelection,
     groupSelection,
@@ -729,6 +733,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
         fitBounds(unionBounds(picked), 40);
       },
       styleSelection,
+      geometrySelection,
       alignSelection,
       distributeSelection,
       reorderSelection,
@@ -770,6 +775,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
     setSelection,
     fitBounds,
     styleSelection,
+    geometrySelection,
     alignSelection,
     distributeSelection,
     reorderSelection,

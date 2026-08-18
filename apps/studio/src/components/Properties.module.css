@@ -1,0 +1,148 @@
+/* The properties of the elements in hand: a small card floating over the
+   right edge of the board, the way Excalidraw's sits over its canvas. */
+.panel {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 60;
+  width: 15.5rem;
+  padding: 0.625rem;
+  border-radius: 0.625rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(24, 24, 27, 0.86);
+  -webkit-backdrop-filter: blur(0.75rem);
+  backdrop-filter: blur(0.75rem);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.32);
+  font:
+    500 11px/1.2 "Inter",
+    system-ui,
+    sans-serif;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.panel[data-shell="light"] {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.14);
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.title {
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.panel[data-shell="light"] .title {
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.count {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.panel[data-shell="light"] .count {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* The geometry fields: a two-column grid with the rotation on its own row. */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.375rem;
+  margin-bottom: 0.625rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.fieldLabel {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.panel[data-shell="light"] .fieldLabel {
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.fieldInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.375rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+  font:
+    600 11px/1.2 "Inter",
+    system-ui,
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.panel[data-shell="light"] .fieldInput {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.fieldInput:disabled {
+  opacity: 0.4;
+}
+
+.section {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.panel[data-shell="light"] .section {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+.sectionTitle {
+  display: block;
+  margin-bottom: 0.375rem;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.panel[data-shell="light"] .sectionTitle {
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.375rem;
+}
+
+.swatch {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.swatchDot {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}

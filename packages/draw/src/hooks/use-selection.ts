@@ -33,6 +33,18 @@ export type StylePatch = {
 export type ReorderHow = "front" | "back" | "forward" | "backward";
 export type AlignHow = "left" | "center" | "right" | "top" | "middle" | "bottom";
 
+/** What a geometry action may change on the elements in hand. */
+export type GeometryPatch = {
+  /** The union box's new top-left; every element moves with it. */
+  x?: number;
+  y?: number;
+  /** The union box's new size; each element scales to keep its place. */
+  w?: number;
+  h?: number;
+  /** A single element's rotation, in degrees clockwise about its centre. */
+  rotation?: number;
+};
+
 /**
  * The elements in hand, and everything that can be done to them: styling,
  * deletion, duplication, layering, alignment and grouping.
@@ -219,6 +231,56 @@ export function useSelection(drawing: DrawingController) {
     [drawing, selection],
   );
 
+  /**
+   * Move, resize and rotate the elements in hand as one undoable step.
+   * `x`/`y` are the union box's new top-left, `w`/`h` its new size — each
+   * figure scales about that origin, so the whole hand keeps its shape.
+   * `rotation` is absolute, clockwise, in degrees. Frames never scale (their
+   * members would be left behind); text and image marks move but don't scale.
+   */
+  const geometrySelection = useCallback(
+    (patch: GeometryPatch) => {
+      const sel = picked();
+      if (!sel.length) return;
+      const u = unionBounds(sel);
+      const dx = patch.x !== undefined ? patch.x - u.x : 0;
+      const dy = patch.y !== undefined ? patch.y - u.y : 0;
+      const sx = patch.w !== undefined ? patch.w / u.w : 1;
+      const sy = patch.h !== undefined ? patch.h / u.h : 1;
+      const rot = patch.rotation;
+      const next = drawing.strokes.map((s) => {
+        if (!selection.includes(s.id) || s.locked) return s;
+        let out = s;
+        if (dx || dy) out = translateStroke(out, dx, dy);
+        if ((sx !== 1 || sy !== 1) && out.figure && out.figure.kind !== "frame") {
+          const f = out.figure;
+          out = {
+            ...out,
+            figure: {
+              ...f,
+              x: u.x + (f.x - u.x) * sx,
+              y: u.y + (f.y - u.y) * sy,
+              w: f.w * sx,
+              h: f.h * sy,
+              ...(f.bend
+                ? {
+                    bend: {
+                      x: u.x + (f.bend.x - u.x) * sx,
+                      y: u.y + (f.bend.y - u.y) * sy,
+                    },
+                  }
+                : null),
+            },
+          };
+        }
+        if (rot !== undefined) out = { ...out, rotate: rot };
+        return out;
+      });
+      drawing.commit(next);
+    },
+    [drawing, picked, selection],
+  );
+
   /** Align every selected element to one edge of their union box. */
   const alignSelection = useCallback(
     (how: AlignHow) => {
@@ -319,6 +381,7 @@ export function useSelection(drawing: DrawingController) {
     selection,
     setSelection,
     styleSelection,
+    geometrySelection,
     deleteSelection,
     duplicateSelection,
     groupSelection,

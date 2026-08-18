@@ -1,7 +1,6 @@
 import { PageControls } from "./components/PageControls";
 import { ShapeTools } from "./components/ShapeTools";
 import { ThemeToggle } from "./components/ThemeToggle";
-import { ZoomControl } from "./components/ZoomControl";
 import type { DebugState } from "./state";
 import type { ShapeKind } from "pencilart";
 import css from "./Debug.module.css";
@@ -12,7 +11,8 @@ export { defaults } from "./state";
 /**
  * The demo harness's header bar: the brand, the shape in hand, the shell
  * theme, and the pages. The option dropdowns themselves live in the left
- * sidebar (Sidebar.tsx).
+ * sidebar (Sidebar.tsx), and the zoom controls float over the board
+ * (App.tsx), in the corner Excalidraw uses.
  */
 export function Debug({
   shell,
@@ -28,11 +28,6 @@ export function Debug({
   canRedo,
   onUndo,
   onRedo,
-  zoom,
-  onZoom,
-  onZoomReset,
-  onZoomFit,
-  onZoomSelection,
 }: {
   shell: "dark" | "light";
   onShell: (next: "dark" | "light") => void;
@@ -55,12 +50,6 @@ export function Debug({
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  /** The current zoom, as a whole-number percentage. */
-  zoom: number;
-  onZoom: (factor: number) => void;
-  onZoomReset: () => void;
-  onZoomFit: () => void;
-  onZoomSelection: () => void;
 }) {
   return (
     <div className={css.bar}>
@@ -69,14 +58,6 @@ export function Debug({
       <ShapeTools shape={shape} onShape={onShape} />
 
       <ThemeToggle shell={shell} onShell={onShell} />
-
-      <ZoomControl
-        percent={zoom}
-        onZoom={onZoom}
-        onReset={onZoomReset}
-        onFit={onZoomFit}
-        onSelection={onZoomSelection}
-      />
 
       <PageControls
         page={page}

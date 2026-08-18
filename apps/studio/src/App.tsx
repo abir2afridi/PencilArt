@@ -9,6 +9,8 @@ import {
 } from "pencilart";
 import { Debug, type DebugState, defaults } from "./Debug";
 import { Sidebar } from "./components/Sidebar";
+import { ZoomControl } from "./components/ZoomControl";
+import { Properties } from "./components/Properties";
 import css from "./App.module.css";
 
 /** Where the book lives between visits: the whole stack, plus which page
@@ -129,11 +131,6 @@ export default function App() {
           canRedo={hist.canRedo}
           onUndo={() => draw.current?.undo()}
           onRedo={() => draw.current?.redo()}
-          zoom={Math.round(view.k * 100)}
-          onZoom={(factor) => draw.current?.zoomBy(factor)}
-          onZoomReset={() => draw.current?.zoomReset()}
-          onZoomFit={() => draw.current?.zoomFit()}
-          onZoomSelection={() => draw.current?.zoomToSelection()}
         />
       </header>
       {/* The controls down the left edge, and the book taking the rest. */}
@@ -202,6 +199,23 @@ export default function App() {
             />
           </div>
         )}
+        {/* Zoom and the properties of the elements in hand float over the
+            board, in the corners Excalidraw uses. */}
+        <div className={css.zoomFloat} data-zoom data-shell={shell}>
+          <ZoomControl
+            percent={Math.round(view.k * 100)}
+            onZoom={(factor) => draw.current?.zoomBy(factor)}
+            onReset={() => draw.current?.zoomReset()}
+            onFit={() => draw.current?.zoomFit()}
+            onSelection={() => draw.current?.zoomToSelection()}
+          />
+        </div>
+        <Properties
+          strokes={pages[page]}
+          selection={selection}
+          draw={draw}
+          shell={shell}
+        />
         </div>
       </div>
     </div>
