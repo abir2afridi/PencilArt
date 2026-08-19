@@ -10,7 +10,8 @@ export type PenId =
   | "marker"
   | "highlighter"
   | "brush"
-  | "fountain";
+  | "fountain"
+  | "eraser-pen";
 
 /** A geometric figure the surface can draw, like a pen but dragged, not
  * traced. */
@@ -35,8 +36,8 @@ export type ToolId = PenId | "eraser" | "select" | "text" | ShapeKind;
 export type Pen = {
   id: PenId;
   name: string;
-  /** single-key keyboard shortcut */
-  key: string;
+  /** single-key keyboard shortcut. Absent, the pen has none. */
+  key?: string;
   defaultSize: number;
   /** default stroke opacity (0–1) */
   defaultOpacity: number;

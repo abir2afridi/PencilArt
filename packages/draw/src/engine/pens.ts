@@ -140,6 +140,20 @@ export const PENS: Pen[] = [
       variance: 0.45,
     }),
   },
+  {
+    id: "eraser-pen",
+    name: "Eraser Pen",
+    // No keyboard shortcut: E already belongs to the bar's eraser.
+    defaultSize: 24,
+    defaultOpacity: 1,
+    options: (size) => ({
+      // The tip is a uniform rubber block, not a marking nib.
+      size,
+      thinning: 0,
+      streamline: 0.3,
+      simulatePressure: false,
+    }),
+  },
 ];
 
 export const PEN_BY_ID = Object.fromEntries(

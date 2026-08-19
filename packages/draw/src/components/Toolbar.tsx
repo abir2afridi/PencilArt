@@ -135,6 +135,10 @@ export function Toolbar({
   const [canPick, setCanPick] = useState(false);
   useEffect(() => setCanPick(supportsEyeDropper()), []);
   const isEraser = tool.active === "eraser";
+  /** The eraser pen takes away too, so it shares the eraser's treatment:
+      no ink to show, no opacity to set — but it keeps its own size. */
+  const isEraserPen = tool.active === "eraser-pen";
+  const noInk = isEraser || isEraserPen;
   const vertical = placement !== "bottom";
   const size = isEraser ? tool.eraserSize : tool.size;
   const maxSize = isEraser ? 120 : 80;
@@ -150,9 +154,9 @@ export function Toolbar({
     size,
     maxSize,
     opacity: tool.opacity,
-    color: isEraser ? "#c9c7c2" : tool.color,
+    color: noInk ? "#c9c7c2" : tool.color,
     // An eraser takes away; there is nothing to be partly opaque about.
-    showOpacity: !isEraser,
+    showOpacity: !noInk,
   };
   const latest = useRef(live);
   latest.current = live;
@@ -197,7 +201,7 @@ export function Toolbar({
 
   /* What the size control is called, given what it actually opens. */
   const sizeLabel =
-    show.size && show.opacity && !isEraser
+    show.size && show.opacity && !noInk
       ? "Size & opacity"
       : show.size
         ? "Size"
@@ -350,7 +354,7 @@ export function Toolbar({
                   >
                     <ToolIcon
                       id={pen.id}
-                      color={inkFor(pen.id)}
+                      color={pen.id === "eraser-pen" ? "#c9c7c2" : inkFor(pen.id)}
                       look={look}
                       badge={gauge && tool.active === pen.id ? size : undefined}
                     />
@@ -413,15 +417,15 @@ export function Toolbar({
                       aria-label={sizeLabel}
                       {...tip.bindControl(sizeLabel)}
                     >
-                      <span
-                        className={css.brushDot}
-                        style={{
-                          width: 6 + (size / maxSize) * 16,
-                          height: 6 + (size / maxSize) * 16,
-                          background: isEraser ? "#c9c7c2" : tool.color,
-                          opacity: isEraser ? 1 : tool.opacity,
-                        }}
-                      />
+<span
+                          className={css.brushDot}
+                          style={{
+                            width: 6 + (size / maxSize) * 16,
+                            height: 6 + (size / maxSize) * 16,
+                            background: noInk ? "#c9c7c2" : tool.color,
+                            opacity: noInk ? 1 : tool.opacity,
+                          }}
+                        />
                     </button>
                   </span>
                 )}
@@ -489,7 +493,7 @@ export function Toolbar({
                         // so the pen is chosen first: `onChange` looks at the
                         // active tool, and while the eraser is in hand a colour
                         // pick would be dropped before the switch ever ran.
-                        if (isEraser) onSelect("pen");
+                        if (noInk) onSelect("pen");
                         onChange({ color: c });
                       }}
                       aria-label={c}
@@ -556,7 +560,7 @@ export function Toolbar({
                   <Spectrum
                     color={tool.color}
                     onChange={(color) => {
-                      if (isEraser) onSelect("pen");
+                      if (noInk) onSelect("pen");
                       onChange({ color });
                     }}
                   />
@@ -565,7 +569,7 @@ export function Toolbar({
                   <HexField
                     value={tool.color}
                     onChange={(color) => {
-                      if (isEraser) onSelect("pen");
+                      if (noInk) onSelect("pen");
                       onChange({ color });
                     }}
                   />
@@ -579,7 +583,7 @@ export function Toolbar({
                     onClick={async () => {
                       const picked = await pickFromScreen();
                       if (!picked) return;
-                      if (isEraser) onSelect("pen");
+                      if (noInk) onSelect("pen");
                       onChange({ color: picked });
                     }}
                   >
@@ -606,14 +610,14 @@ export function Toolbar({
                       max={maxSize}
                       curve={2}
                       display={String(Math.round(size))}
-                      color={isEraser ? "#c9c7c2" : tool.color}
+                      color={noInk ? "#c9c7c2" : tool.color}
                       onChange={(n) =>
                         onChange(isEraser ? { eraserSize: n } : { size: n })
                       }
                     />
                   </>
                 )}
-                {show.opacity && !isEraser && (
+                {show.opacity && !noInk && (
                   <>
                     <span className={css.divider} />
                     <BarSlider

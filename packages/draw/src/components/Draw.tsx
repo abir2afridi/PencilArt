@@ -1318,7 +1318,7 @@ export const Draw = forwardRef<DrawHandle, DrawProps>(function Draw(
               ["Zoom to selection", "Shift+2"],
               ["Fit to view", "Shift+1"],
               ["Help", "?"],
-              ...PENS.filter((p) => p.key).map(
+              ...PENS.filter((p): p is (typeof PENS)[number] & { key: string } => Boolean(p.key)).map(
                 (p) => [p.name, p.key.toUpperCase()] as const,
               ),
               ...SHAPES.map((s) => [s.name, s.key.toUpperCase()] as const),

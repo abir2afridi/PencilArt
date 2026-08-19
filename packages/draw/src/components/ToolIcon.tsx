@@ -661,6 +661,31 @@ function Eraser({ g, look }: Parts) {
   );
 }
 
+function EraserPen({ g, look }: Parts) {
+  return (
+    <>
+      <Barrel g={g} />
+      {/* A neutral band, so the barrel reads as "rubber, not ink". */}
+      <Shaded d={`M5 ${BAND_TOP}h20v5H5Z`} fill="#b8b4ad" g={g} look={look} />
+      {/* The rubber tip: a short taper, in the same soft block as the bar's
+          eraser, so the family resemblance is instant. */}
+      <Shaded
+        d={`M11 25 12.4 ${APEX + 2}a2.4 2.4 0 0 1 2.4-2h.4a2.4 2.4 0 0 1 2.4 2L19 25Z`}
+        fill={u(g.rubber)}
+        g={g}
+        rim
+        look={look}
+      />
+      <Shaded
+        d={`M5 ${BASE}V${FLARE}L9.6 22.6h10.8L25 ${FLARE}V${BASE}Z`}
+        fill={COLLAR}
+        g={g}
+        look={look}
+      />
+    </>
+  );
+}
+
 const TOOLS: Record<ToolIconId, (p: Parts) => React.ReactElement> = {
   pencil: Pencil,
   pen: Pen,
@@ -669,6 +694,7 @@ const TOOLS: Record<ToolIconId, (p: Parts) => React.ReactElement> = {
   highlighter: Highlighter,
   brush: Brush,
   fountain: Calligraphy,
+  "eraser-pen": EraserPen,
   eraser: Eraser,
 };
 

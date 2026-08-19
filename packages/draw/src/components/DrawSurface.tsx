@@ -25,6 +25,7 @@ import {
   unionBounds,
 } from "../engine/geometry";
 import { PEN_BY_ID } from "../engine/pens";
+import { easeOut, plerp, trailOutline } from "../engine/laser-trail";
 import { nextFrameName } from "../engine/shapes/frame";
 import { HAND, measureLines } from "../engine/text";
 import type { Board, Box, FigureDash, FigureFill, Point, Shape, ShapeKind, Stroke } from "../engine/types";
@@ -216,6 +217,27 @@ export function DrawSurface({
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   /** The marquee being dragged out, in board coordinates. */
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  /**
+   * The elements the eraser pen is about to take: they fade out while the
+   * tip is over them, exactly like Excalidraw's eraser, and are removed
+   * on release. The ref is what the gestures read; the state only drives
+   * the fade.
+   */
+  const [pendingErase, setPendingErase] = useState<number[]>([]);
+  const pendingEraseRef = useRef<number[]>([]);
+
+  /** Excalidraw's EraserTrail, as state: the sweep's points, each stamped
+   *  with when it was laid, drain away TRAIL_DECAY ms behind the tip, so the
+   *  eraser's cursor is always melting off its own tail. */
+  const [eraserTrail, setEraserTrail] = useState<number[][]>([]);
+  const eraserTrailRef = useRef<number[][]>([]);
+  const trailRaf = useRef(0);
+  /** Whether the next pushed point begins the ribbon fresh (no streamline). */
+  const trailFresh = useRef(false);
+  /** How long a swept point stays alive — Excalidraw's DECAY_TIME. */
+  const TRAIL_DECAY = 200;
+  /** How many points at the tail get the length taper — DECAY_LENGTH. */
+  const TRAIL_LENGTH = 10;
 
   const drawingNow = useRef(false);
   const pointsRef = useRef<Point[]>([]);
@@ -323,6 +345,9 @@ export function DrawSurface({
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, [board.w, board.h, toBoard, screenScale, changeView]);
+
+  // The eraser trail's decay loop must die with the surface.
+  useEffect(() => () => cancelAnimationFrame(trailRaf.current), []);
 
   // Space turns the pointer into a pan hand, anywhere over the page.
   const spaceHeld = useRef(false);
@@ -614,6 +639,85 @@ export function DrawSurface({
     void e;
   };
 
+  /** The eraser pen's sweep: the elements under the newest stretch of the
+   *  path are marked for erasure and fade to 20% (Excalidraw's ready-to-erase
+   *  look); with Alt held, the tip pulls them back out again. Whole elements
+   *  go, never parts, and the marks stay until the stroke is lifted. */
+  /** The animated ribbon behind an eraser's tip. Each frame, points older
+   *  than TRAIL_DECAY drop off, so the tail shrinks even when the cursor
+   *  holds still, and melts away ~200ms after it stops. The re-render every
+   *  frame is the animation: the ribbon's per-point widths decay with time,
+   *  so its shape keeps melting between pointer events. */
+  const stepTrail = useCallback(() => {
+    trailRaf.current = 0;
+    const now = performance.now();
+    const pts = eraserTrailRef.current;
+    const alive = pts.filter((p) => now - p[2] < TRAIL_DECAY);
+    if (alive.length === 0) {
+      eraserTrailRef.current = [];
+      setEraserTrail([]);
+      return;
+    }
+    eraserTrailRef.current = alive;
+    setEraserTrail(alive);
+    trailRaf.current = requestAnimationFrame(stepTrail);
+  }, []);
+
+  /** Lay a point under the eraser's tip — streamlined toward the last one,
+   *  Excalidraw's 0.2 — and wake the decay loop if it is sleeping. */
+  const pushTrail = useCallback(
+    (x: number, y: number) => {
+      const pts = eraserTrailRef.current;
+      const pt: number[] = trailFresh.current
+        ? [x, y, performance.now()]
+        : [
+            ...plerp(
+              [pts[pts.length - 1][0], pts[pts.length - 1][1], 0.5],
+              [x, y, 0.5],
+              0.8,
+            ),
+            performance.now(),
+          ];
+      trailFresh.current = false;
+      eraserTrailRef.current = [...pts, pt];
+      setEraserTrail(eraserTrailRef.current);
+      if (!trailRaf.current) trailRaf.current = requestAnimationFrame(stepTrail);
+    },
+    [stepTrail],
+  );
+
+  const eraseWith = useCallback(
+    (pts: Point[], alt: boolean) => {
+      const t = state.current.tool;
+      const size = t.kind === "pen" ? t.size : 24;
+      const room = Math.max(3, size / 2);
+      const strokes = drawing.strokes;
+      const a = pts[pts.length - 2];
+      const b = pts[pts.length - 1];
+      if (!a || !b) return;
+      const run = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const steps = Math.max(1, Math.ceil(run / Math.max(3, room)));
+      const hits: number[] = [];
+      for (let i = 0; i <= steps; i++) {
+        const f = i / steps;
+        const x = a[0] + (b[0] - a[0]) * f;
+        const y = a[1] + (b[1] - a[1]) * f;
+        for (const s of strokes) {
+          if (s.erase || s.locked) continue;
+          if (hitTest(s, x, y, room)) hits.push(s.id);
+        }
+      }
+      const pending = new Set(pendingEraseRef.current);
+      for (const id of new Set(hits)) {
+        if (alt) pending.delete(id);
+        else pending.add(id);
+      }
+      pendingEraseRef.current = [...pending];
+      setPendingErase(pendingEraseRef.current);
+    },
+    [drawing.strokes],
+  );
+
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (ignore(e)) return;
     // While a text is being edited, only the textarea itself matters.
@@ -660,6 +764,11 @@ export function DrawSurface({
     const p: Point = [x, y, e.pressure || 0.5];
     pointsRef.current = [p];
     setCurrent([p]);
+    // The trail starts under the tip the moment the sweep begins.
+    if (tool.kind === "eraser" || (tool.kind === "pen" && tool.pen === "eraser-pen")) {
+      trailFresh.current = true;
+      pushTrail(x, y);
+    }
   };
 
   const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -890,6 +999,10 @@ export function DrawSurface({
 
       pointsRef.current = [...st.settled, ...runPoints(st.anchor, tip, pressure)];
       setCurrent(pointsRef.current);
+      if (tool.kind === "eraser" || (tool.kind === "pen" && tool.pen === "eraser-pen")) {
+        if (tool.kind === "pen") eraseWith(pointsRef.current, e.altKey);
+        pushTrail(tip[0], tip[1]);
+      }
       return;
     }
 
@@ -902,6 +1015,10 @@ export function DrawSurface({
 
     pointsRef.current = [...pts, [x, y, pressure]];
     setCurrent(pointsRef.current);
+    if (tool.kind === "eraser" || (tool.kind === "pen" && tool.pen === "eraser-pen")) {
+      if (tool.kind === "pen") eraseWith(pointsRef.current, e.altKey);
+      pushTrail(x, y);
+    }
   };
 
   const finishGesture = (e?: React.PointerEvent) => {
@@ -988,6 +1105,21 @@ export function DrawSurface({
       drawing.commit([...drawing.strokes, stroke]);
       state.current.onSelection?.([stroke.id]);
       state.current.onShapeDone?.();
+      return;
+    }
+
+    // The eraser pen never lays ink: it takes the whole elements the sweep
+    // marked, as one undoable step, exactly like Excalidraw. A stroke that
+    // touched nothing commits nothing.
+    if (tool.kind === "pen" && tool.pen === "eraser-pen") {
+      const ids = pendingEraseRef.current;
+      pendingEraseRef.current = [];
+      setPendingErase([]);
+      if (ids.length) {
+        const doomed = new Set(ids);
+        drawing.commit(drawing.strokes.filter((s) => !doomed.has(s.id)));
+        state.current.onSelection?.([]);
+      }
       return;
     }
 
@@ -1589,15 +1721,30 @@ export function DrawSurface({
                       />
                     ) : null;
                   if (!g) return null;
-                  if (!rotate) return <g key={s.id}>{g}</g>;
-                  const b = boundsOf(rot!);
-                  const [cx, cy] = centreOf(b);
+                  // The eraser pen's pending marks fade to 20% — Excalidraw's
+                  // ready-to-erase look — and fade back if the tip moves on.
+                  // The transition is the animation.
+                  const fading = pendingErase.includes(s.id);
+                  const inner = rotate ? (
+                    (() => {
+                      const b = boundsOf(rot!);
+                      const [cx, cy] = centreOf(b);
+                      return (
+                        <g transform={`rotate(${rotate} ${cx} ${cy})`}>
+                          {g}
+                        </g>
+                      );
+                    })()
+                  ) : (
+                    g
+                  );
                   return (
                     <g
                       key={s.id}
-                      transform={`rotate(${rotate} ${cx} ${cy})`}
+                      opacity={fading ? 0.2 : undefined}
+                      style={{ transition: "opacity 160ms ease" }}
                     >
-                      {g}
+                      {inner}
                     </g>
                   );
                 })}
@@ -1605,7 +1752,7 @@ export function DrawSurface({
             );
           })}
 
-          {tool.kind === "pen" && current.length > 0 && (
+          {tool.kind === "pen" && tool.pen !== "eraser-pen" && current.length > 0 && (
             <path
               d={strokePath(tool.pen, tool.size, current, false, {
                 ...tool.shape,
@@ -1656,6 +1803,40 @@ export function DrawSurface({
                 );
               })()
             ))}
+
+          {/* Excalidraw's eraser trail: a ribbon of the sweep's points, drawn as a
+              closed outline with a per-point width that melts with time, so
+              the tail drains away 200ms behind the tip. While the sweep is
+              down the head is kept as a full-size dot — the cursor itself —
+              and melts off once the stroke lifts. */}
+          {(tool.kind === "eraser" ||
+            (tool.kind === "pen" && tool.pen === "eraser-pen")) &&
+            eraserTrail.length > 0 &&
+            (() => {
+              const now = performance.now();
+              const k = viewRef.current.k;
+              const W = 5 / k;
+              const len = eraserTrail.length;
+              const pts: Point[] = eraserTrail.map((p, i) => {
+                const t = Math.max(0, 1 - (now - p[2]) / TRAIL_DECAY);
+                const l =
+                  (TRAIL_LENGTH - Math.min(TRAIL_LENGTH, len - i)) / TRAIL_LENGTH;
+                return [p[0], p[1], W * Math.min(easeOut(l), easeOut(t))];
+              });
+              const outline = trailOutline(pts, drawingNow.current, W);
+              if (outline.length < 3) return null;
+              const ink =
+                !isPale(background) && background !== "transparent"
+                  ? "255,255,255"
+                  : "0,0,0";
+              return (
+                <path
+                  d={`M${outline.map((p) => `${p[0]} ${p[1]}`).join("L")}Z`}
+                  fill={`rgba(${ink},0.2)`}
+                  pointerEvents="none"
+                />
+              );
+            })()}
 
           {/* The text being typed, live under the overlay. */}
           {editing && (
@@ -2058,31 +2239,19 @@ function BrushCursor({
     />
   );
 
-  if (tool.kind === "eraser") {
+  if (tool.kind === "eraser" || (tool.kind === "pen" && tool.pen === "eraser-pen")) {
+    // Excalidraw's eraser cursor, exactly: a small circle of the page colour
+    // with an ink outline, so it reads on both the board and whatever is
+    // already drawn on it.
     return (
-      <>
-        {halo}
-        <circle
-          cx={at.x}
-          cy={at.y}
-          r={r}
-          fill={onDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)"}
-          stroke={stroke}
-          strokeWidth={hair}
-        />
-        {!onDark && (
-          <path
-            d={`M${at.x - 3 * hair} ${at.y}h${6 * hair}M${at.x} ${at.y - 3 * hair}v${6 * hair}`}
-            stroke="rgba(255,255,255,0.9)"
-            strokeWidth={hair * 2.5}
-          />
-        )}
-        <path
-          d={`M${at.x - 3 * hair} ${at.y}h${6 * hair}M${at.x} ${at.y - 3 * hair}v${6 * hair}`}
-          stroke={stroke}
-          strokeWidth={hair}
-        />
-      </>
+      <circle
+        cx={at.x}
+        cy={at.y}
+        r={5 / scale}
+        fill={onDark ? "#000" : "#fff"}
+        stroke={onDark ? "#fff" : "#000"}
+        strokeWidth={hair}
+      />
     );
   }
 
