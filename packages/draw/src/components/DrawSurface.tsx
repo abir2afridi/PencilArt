@@ -25,7 +25,8 @@ import {
   unionBounds,
 } from "../engine/geometry";
 import { PEN_BY_ID } from "../engine/pens";
-import { easeOut, plerp, trailOutline } from "../engine/laser-trail";
+import { easeOut, trailOutline } from "../engine/laser-trail";
+import { TRAIL_DECAY, TRAIL_LENGTH, useEraserTrail } from "../hooks/useEraserTrail";
 import { nextFrameName } from "../engine/shapes/frame";
 import { HAND, measureLines } from "../engine/text";
 import type { Board, Box, FigureDash, FigureFill, Point, Shape, ShapeKind, Stroke } from "../engine/types";
@@ -226,20 +227,14 @@ export function DrawSurface({
   const [pendingErase, setPendingErase] = useState<number[]>([]);
   const pendingEraseRef = useRef<number[]>([]);
 
-  /** Excalidraw's EraserTrail, as state: the sweep's points, each stamped
-   *  with when it was laid, drain away TRAIL_DECAY ms behind the tip, so the
-   *  eraser's cursor is always melting off its own tail. */
-  const [eraserTrail, setEraserTrail] = useState<number[][]>([]);
-  const eraserTrailRef = useRef<number[][]>([]);
-  const trailRaf = useRef(0);
-  /** Whether the next pushed point begins the ribbon fresh (no streamline). */
-  const trailFresh = useRef(false);
-  /** How long a swept point stays alive — Excalidraw's DECAY_TIME. */
-  const TRAIL_DECAY = 200;
-  /** How many points at the tail get the length taper — DECAY_LENGTH. */
-  const TRAIL_LENGTH = 10;
-
   const drawingNow = useRef(false);
+
+  // ---- Eraser trail (see hooks/useEraserTrail.ts) ----
+  const isEraserTool =
+    tool.kind === "eraser" || (tool.kind === "pen" && tool.pen === "eraser-pen");
+  const { eraserTrail, pushTrail, clearTrail, startSweep } =
+    useEraserTrail(drawingNow, isEraserTool);
+
   const pointsRef = useRef<Point[]>([]);
   const activePointer = useRef<number | null>(null);
   const gesture = useRef<Gesture>({ mode: "none" });
@@ -345,9 +340,6 @@ export function DrawSurface({
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, [board.w, board.h, toBoard, screenScale, changeView]);
-
-  // The eraser trail's decay loop must die with the surface.
-  useEffect(() => () => cancelAnimationFrame(trailRaf.current), []);
 
   // Space turns the pointer into a pan hand, anywhere over the page.
   const spaceHeld = useRef(false);
@@ -639,53 +631,6 @@ export function DrawSurface({
     void e;
   };
 
-  /** The eraser pen's sweep: the elements under the newest stretch of the
-   *  path are marked for erasure and fade to 20% (Excalidraw's ready-to-erase
-   *  look); with Alt held, the tip pulls them back out again. Whole elements
-   *  go, never parts, and the marks stay until the stroke is lifted. */
-  /** The animated ribbon behind an eraser's tip. Each frame, points older
-   *  than TRAIL_DECAY drop off, so the tail shrinks even when the cursor
-   *  holds still, and melts away ~200ms after it stops. The re-render every
-   *  frame is the animation: the ribbon's per-point widths decay with time,
-   *  so its shape keeps melting between pointer events. */
-  const stepTrail = useCallback(() => {
-    trailRaf.current = 0;
-    const now = performance.now();
-    const pts = eraserTrailRef.current;
-    const alive = pts.filter((p) => now - p[2] < TRAIL_DECAY);
-    if (alive.length === 0) {
-      eraserTrailRef.current = [];
-      setEraserTrail([]);
-      return;
-    }
-    eraserTrailRef.current = alive;
-    setEraserTrail(alive);
-    trailRaf.current = requestAnimationFrame(stepTrail);
-  }, []);
-
-  /** Lay a point under the eraser's tip — streamlined toward the last one,
-   *  Excalidraw's 0.2 — and wake the decay loop if it is sleeping. */
-  const pushTrail = useCallback(
-    (x: number, y: number) => {
-      const pts = eraserTrailRef.current;
-      const pt: number[] = trailFresh.current
-        ? [x, y, performance.now()]
-        : [
-            ...plerp(
-              [pts[pts.length - 1][0], pts[pts.length - 1][1], 0.5],
-              [x, y, 0.5],
-              0.8,
-            ),
-            performance.now(),
-          ];
-      trailFresh.current = false;
-      eraserTrailRef.current = [...pts, pt];
-      setEraserTrail(eraserTrailRef.current);
-      if (!trailRaf.current) trailRaf.current = requestAnimationFrame(stepTrail);
-    },
-    [stepTrail],
-  );
-
   const eraseWith = useCallback(
     (pts: Point[], alt: boolean) => {
       const t = state.current.tool;
@@ -766,7 +711,7 @@ export function DrawSurface({
     setCurrent([p]);
     // The trail starts under the tip the moment the sweep begins.
     if (tool.kind === "eraser" || (tool.kind === "pen" && tool.pen === "eraser-pen")) {
-      trailFresh.current = true;
+      startSweep();
       pushTrail(x, y);
     }
   };
@@ -775,6 +720,14 @@ export function DrawSurface({
     if (ignore(e)) return;
     const { x, y } = toBoard(e.clientX, e.clientY);
     if (e.pointerType !== "touch") setHover({ x, y });
+    // With an eraser armed, the ribbon streams under the cursor even before
+    // any press — it is the cursor, the way Excalidraw's trail is.
+    if (
+      e.pointerId !== activePointer.current &&
+      (tool.kind === "eraser" || (tool.kind === "pen" && tool.pen === "eraser-pen"))
+    ) {
+      pushTrail(x, y);
+    }
     if (e.pointerId !== activePointer.current) return;
 
     const g = gesture.current;
@@ -1008,17 +961,22 @@ export function DrawSurface({
 
     straight.current = null;
 
+    const last = pts[pts.length - 1];
+    // The eraser's trail drinks every move, even sub-pixel ones — Excalidraw's
+    // addPoint only skips a point that sits exactly on the last — so the
+    // ribbon stays fluid at slow speeds instead of stuttering on the stroke
+    // filter below.
+    if (tool.kind === "eraser" || (tool.kind === "pen" && tool.pen === "eraser-pen")) {
+      if (tool.kind === "pen") eraseWith([...pts, [x, y, pressure]], e.altKey);
+      pushTrail(x, y);
+    }
+
     // Drop points closer than a screen pixel — at high zoom this is the
     // difference between a smooth line and thousands of redundant samples.
-    const last = pts[pts.length - 1];
     if (last && Math.hypot(x - last[0], y - last[1]) < 1.1 / viewRef.current.k) return;
 
     pointsRef.current = [...pts, [x, y, pressure]];
     setCurrent(pointsRef.current);
-    if (tool.kind === "eraser" || (tool.kind === "pen" && tool.pen === "eraser-pen")) {
-      if (tool.kind === "pen") eraseWith(pointsRef.current, e.altKey);
-      pushTrail(x, y);
-    }
   };
 
   const finishGesture = (e?: React.PointerEvent) => {
@@ -1061,6 +1019,10 @@ export function DrawSurface({
     if (!drawingNow.current) return;
     drawingNow.current = false;
     straight.current = null;
+
+    // Excalidraw's endPath: the eraser's trail is gone the moment the
+    // sweep lifts, not melted away.
+    clearTrail();
 
     const pts = pointsRef.current;
     pointsRef.current = [];
@@ -1523,6 +1485,7 @@ export function DrawSurface({
       onPointerCancel={finishGesture}
       onPointerLeave={(e) => {
         setHover(null);
+        clearTrail();
         finishGesture(e);
       }}
       onContextMenu={(e) => {
@@ -1823,7 +1786,7 @@ export function DrawSurface({
                   (TRAIL_LENGTH - Math.min(TRAIL_LENGTH, len - i)) / TRAIL_LENGTH;
                 return [p[0], p[1], W * Math.min(easeOut(l), easeOut(t))];
               });
-              const outline = trailOutline(pts, drawingNow.current, W);
+              const outline = trailOutline(pts, drawingNow.current, 5);
               if (outline.length < 3) return null;
               const ink =
                 !isPale(background) && background !== "transparent"
