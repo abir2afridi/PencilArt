@@ -720,14 +720,6 @@ export function DrawSurface({
     if (ignore(e)) return;
     const { x, y } = toBoard(e.clientX, e.clientY);
     if (e.pointerType !== "touch") setHover({ x, y });
-    // With an eraser armed, the ribbon streams under the cursor even before
-    // any press — it is the cursor, the way Excalidraw's trail is.
-    if (
-      e.pointerId !== activePointer.current &&
-      (tool.kind === "eraser" || (tool.kind === "pen" && tool.pen === "eraser-pen"))
-    ) {
-      pushTrail(x, y);
-    }
     if (e.pointerId !== activePointer.current) return;
 
     const g = gesture.current;
