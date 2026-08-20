@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import type { DrawHandle } from "pencilart";
 import type { DebugState } from "../state";
 import { AlignControl } from "./controls/Align";
@@ -102,28 +102,6 @@ export function Sidebar({
 }) {
   const [open, setOpen] = useState(false);
   const [drawer, setDrawer] = useState(false);
-  const aside = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    // While the rail is open, stay open only while the pointer is over the
-    // sidebar — including any menu hanging off a trigger, which is a
-    // descendant of the aside and therefore still "inside". Anything else
-    // (the page, an open dropdown's neighbours, the air) folds it shut.
-    const onMove = (e: PointerEvent) => {
-      const hit = document.elementFromPoint(e.clientX, e.clientY);
-      if (!aside.current?.contains(hit)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
 
   useEffect(() => {
     if (!drawer) return;
@@ -134,23 +112,40 @@ export function Sidebar({
     return () => document.removeEventListener("keydown", onKey);
   }, [drawer]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
   return (
     <>
       <aside
-        ref={aside}
         className={css.sidebar}
         data-sidebar
         data-shell={shell}
         data-open={open ? "true" : "false"}
-        onPointerEnter={() => setOpen(true)}
       >
-        <Brand open={open} />
-        <Controls
-          value={value}
-          onChange={onChange}
-          draw={draw}
-          selection={selection}
-        />
+        <button
+          type="button"
+          className={css.toggleBtn}
+          aria-label={open ? "Close sidebar" : "Open sidebar"}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? <XIcon /> : <MenuIcon />}
+        </button>
+        <div className={css.controlsWrap}>
+          <Brand open={open} />
+          <Controls
+            value={value}
+            onChange={onChange}
+            draw={draw}
+            selection={selection}
+          />
+        </div>
       </aside>
       {/* The thin bar on small screens, and the drawer it opens. */}
       <div className={css.mobilebar} data-shell={shell}>

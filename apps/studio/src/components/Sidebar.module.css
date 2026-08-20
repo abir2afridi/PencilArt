@@ -1,6 +1,6 @@
 /* The demo controls, stacked down the left edge. Same glass as the header,
-   so the harness reads as one surface. Collapsed to a rail of glyphs, it
-   fans out to a full column while the pointer is over it or its menus. */
+   so the harness reads as one surface. Collapsed to a rail of glyphs;
+   clicking the toggle fans out the full panel with labels. */
 .sidebar {
   box-sizing: border-box;
   flex: 0 0 auto;
@@ -8,7 +8,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  padding: 0.75rem 0.5rem;
+  padding: 0.5rem;
   overflow-y: auto;
   overflow-x: hidden;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
@@ -25,12 +25,49 @@
 
 .sidebar[data-open="true"] {
   width: 15rem;
+  padding: 0.75rem 0.5rem;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .sidebar[data-shell="light"] {
   border-right-color: rgba(0, 0, 0, 0.08);
   background: rgba(255, 255, 255, 0.8);
   color: rgba(0, 0, 0, 0.6);
+}
+
+/* The 3-line hamburger toggle button at the top of the rail. */
+.toggleBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.375rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggleBtn:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.sidebar[data-shell="light"] .toggleBtn {
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.sidebar[data-shell="light"] .toggleBtn:hover {
+  background: rgba(0, 0, 0, 0.11);
+}
+
+/* Wrapper for brand + controls. */
+.controlsWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
 }
 
 /* The brand at the top of the rail: a pencil in a rounded box — dark ink in
